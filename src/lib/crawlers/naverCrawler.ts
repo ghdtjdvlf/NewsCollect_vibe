@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { randomId, toIso, guessCategory } from './utils'
+import { stableId, toIso, guessCategory } from './utils'
 
 // 네이버 뉴스 섹션 ID
 const NAVER_SECTION: Record<string, string> = {
@@ -65,7 +65,7 @@ export async function fetchNaverSection(
       const summary = $(el).find('.sa_text_lede, .sa_desc, .lede').text().trim() || undefined
 
       items.push({
-        id: randomId('n'),
+        id: stableId(link, 'n'),
         title,
         summary,
         url: link,
@@ -137,7 +137,7 @@ export async function fetchNaverRanking(limit = 20): Promise<NewsItem[]> {
 
       if (title && href) {
         items.push({
-          id: randomId('n'),
+          id: stableId(url, 'n'),
           title,
           url,
           source: 'naver',

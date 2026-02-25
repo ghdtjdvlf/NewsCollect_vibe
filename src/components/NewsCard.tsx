@@ -95,7 +95,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
+      body: JSON.stringify({ id: item.id, title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
     })
       .then((r) => r.json())
       .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {

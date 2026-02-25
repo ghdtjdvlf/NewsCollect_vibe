@@ -1,7 +1,7 @@
 import { fetchWithRetry, parseRss } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { randomId, toIso } from './utils'
+import { stableId, toIso, guessCategory } from './utils'
 
 // 구글 뉴스 KR RSS 엔드포인트
 const GOOGLE_RSS_BASE = 'https://news.google.com/rss'
@@ -30,7 +30,7 @@ export async function fetchGoogleNewsHeadlines(limit = 20): Promise<NewsItem[]> 
     const rssItems = parseRss(xml).slice(0, limit)
 
     const items: NewsItem[] = rssItems.map((r) => ({
-      id: randomId('g'),
+      id: stableId(r.link, 'g'),
       title: r.title,
       url: r.link,
       source: 'google' as const,
@@ -81,7 +81,7 @@ export async function fetchGoogleNewsByCategory(
     const rssItems = parseRss(xml).slice(0, limit)
 
     const items: NewsItem[] = rssItems.map((r) => ({
-      id: randomId('g'),
+      id: stableId(r.link, 'g'),
       title: r.title,
       url: r.link,
       source: 'google' as const,
@@ -119,15 +119,3 @@ export async function fetchGoogleNewsByCategory(
   }
 }
 
-// 제목에서 카테고리 추정
-function guessCategory(title: string): NewsCategory {
-  if (/코스피|코스닥|금리|환율|주가|경제|GDP|물가|금융|주식|부동산/.test(title)) return '경제'
-  if (/사고|화재|추락|사망|부상|범죄|경찰|검거|체포|살인|강도/.test(title)) return '사건사고'
-  if (/대통령|국회|정부|여당|야당|선거|장관|총리|국정/.test(title)) return '정치'
-  if (/AI|반도체|삼성|LG|카카오|네이버|애플|구글|메타|IT|챗GPT/.test(title)) return 'IT/과학'
-  if (/월드컵|올림픽|축구|야구|농구|배구|스포츠|선수|경기/.test(title)) return '스포츠'
-  if (/드라마|영화|아이돌|연예|가수|배우|음악|콘서트/.test(title)) return '연예'
-  if (/미국|중국|일본|러시아|북한|유럽|해외|외교/.test(title)) return '세계'
-  if (/복지|교육|의료|병원|환경|사회|시민/.test(title)) return '사회'
-  return '기타'
-}
