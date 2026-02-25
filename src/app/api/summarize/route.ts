@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
     }
 
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
 
     const content = [title, summary].filter(Boolean).join('\n\n')
     const prompt = `
@@ -41,16 +41,29 @@ export async function POST(req: NextRequest) {
     const result = await model.generateContent(prompt)
     const text = result.response.text()
 
-    const lines = text
+    const allLines = text
       .split('\n')
       .map((l) => l.trim())
       .filter((l) => l.length > 0)
+
+    // 결론 라인 분리 (결론으로 시작하는 줄)
+    const conclusionLine = allLines.find((l) => l.startsWith('결론'))
+    const conclusion = conclusionLine
+      ? conclusionLine.replace(/^결론\s*[:：]\s*/, '').trim()
+      : undefined
+
+    // 요약 3줄: 결론 라인 제외 후 앞 3개
+    const lines = allLines
+      .filter((l) => !l.startsWith('결론'))
       .slice(0, 3)
 
-    return NextResponse.json({ lines })
+    return NextResponse.json({ lines, conclusion })
   } catch (err) {
     console.error('[API/summarize]', err)
     const message = err instanceof Error ? err.message : '알 수 없는 오류'
+    if (message.includes('429') || message.toLowerCase().includes('too many requests') || message.includes('quota')) {
+      return NextResponse.json({ error: '요청이 많습니다! 잠시 후 이용해주세요.' }, { status: 429 })
+    }
     return NextResponse.json({ error: `요약 실패: ${message}` }, { status: 500 })
   }
 }

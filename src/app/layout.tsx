@@ -8,7 +8,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://spnewscollet.netli
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: '딱!세줄 - 뉴스는 읽기 귀찮고 세상 돌아가는 건 궁금한 당신을 위해',
+    default: '딱!세줄 - 3줄 뉴스 요약',
     template: '%s | 딱!세줄',
   },
   description: '길고 복잡한 뉴스는 이제 그만! 딱!세줄이 핵심만 짚어 드립니다. 실시간 뉴스 3줄 요약부터 커뮤니티 실시간 반응까지 한눈에 확인하세요.',

@@ -6,7 +6,7 @@ import { Clock, MessageSquare, TrendingUp, ExternalLink, Eye, Loader2 } from 'lu
 import { cn } from '@/lib/cn'
 import type { NewsItem } from '@/types/news'
 
-const cardTransition = { ease: 'easeInOut', duration: 0.25 }
+const cardTransition = { ease: 'easeIn', duration: 0.2 }
 
 interface NewsCardProps {
   item: NewsItem
@@ -66,6 +66,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
 
   // AI 3줄 요약
   const [summaryLines, setSummaryLines] = useState<string[] | null>(null)
+  const [summaryConclusion, setSummaryConclusion] = useState<string | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryError, setSummaryError] = useState('')
 
@@ -97,9 +98,13 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
       body: JSON.stringify({ title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
     })
       .then((r) => r.json())
-      .then((data: { lines?: string[]; error?: string }) => {
-        if (data.lines && data.lines.length > 0) setSummaryLines(data.lines)
-        else setSummaryError(data.error ?? '요약에 실패했습니다.')
+      .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {
+        if (data.lines && data.lines.length > 0) {
+          setSummaryLines(data.lines)
+          setSummaryConclusion(data.conclusion ?? null)
+        } else {
+          setSummaryError(data.error ?? '요약에 실패했습니다.')
+        }
       })
       .catch(() => setSummaryError('네트워크 오류가 발생했습니다.'))
       .finally(() => setSummaryLoading(false))
@@ -177,10 +182,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
   return (
     <div ref={wrapRef}>
       <motion.article
-        layout
-        layoutId={`card-${item.id}`}
         onClick={handleToggle}
-        transition={cardTransition}
         className={cn(
           'bg-white rounded-2xl overflow-hidden cursor-pointer select-none',
           'border border-gray-100 shadow-sm',
@@ -190,11 +192,9 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
       >
         {/* 썸네일 */}
         {thumbnail ? (
-          <motion.div
-            layout
-            className="relative w-full overflow-hidden"
+          <div
+            className="relative w-full overflow-hidden transition-[height] duration-200 ease-in"
             style={{ height: isExpanded ? 200 : 120 }}
-            transition={cardTransition}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -206,7 +206,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
               onError={handleImgError}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-          </motion.div>
+          </div>
         ) : thumbLoading ? (
           <div className="shimmer h-20 w-full" />
         ) : (
@@ -229,13 +229,9 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
           </div>
 
           {/* 제목 */}
-          <motion.h2
-            layout
-            className={cn('font-semibold text-gray-900 leading-snug', isExpanded ? 'text-base' : 'text-sm line-clamp-2')}
-            transition={cardTransition}
-          >
+          <h2 className={cn('font-semibold text-gray-900 leading-snug', isExpanded ? 'text-base' : 'text-sm line-clamp-2')}>
             {item.title}
-          </motion.h2>
+          </h2>
 
           {/* 확장 시 본문 */}
           <AnimatePresence>
@@ -322,6 +318,12 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
                         </li>
                       ))}
                     </ol>
+                    {summaryConclusion && (
+                      <div className="mt-3 px-3 py-2 bg-indigo-50 rounded-xl">
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wide">결론</span>
+                        <p className="text-xs text-indigo-700 mt-0.5 leading-relaxed">{summaryConclusion}</p>
+                      </div>
+                    )}
                     <p className="text-[10px] text-gray-300 mt-1">AI가 뉴스 원문을 파악하고 요약합니다.</p>
                   </>
                 )}
