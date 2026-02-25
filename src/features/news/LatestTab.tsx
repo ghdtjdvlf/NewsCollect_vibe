@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { motion } from 'framer-motion'
 import { NewsCard } from '@/components/NewsCard'
 import { useLatestNews } from './useNewsQuery'
 import type { NewsCategory } from '@/types/news'
@@ -52,8 +51,11 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
 
   return (
     <div className="space-y-3">
-      {/* 카테고리 필터 */}
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
+      {/* 카테고리 필터 — pointerDown stopPropagation으로 부모 drag(탭 전환) 차단 */}
+      <div
+        className="flex gap-2 overflow-x-auto scrollbar-hide pb-1"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         {displayCategories.map((cat) => {
           const isActive = cat === '전체' ? !selectedCategory : selectedCategory === cat
           return (
@@ -88,22 +90,16 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
           </div>
         ))
       ) : (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-3">
-          {allItems.map((item, i) => (
-            <motion.div
+        <div className="space-y-3">
+          {allItems.map((item) => (
+            <NewsCard
               key={item.id}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(i * 0.04, 0.3) }}
-            >
-              <NewsCard
-                item={item}
-                expandedId={expandedId}
-                onExpand={setExpandedId}
-              />
-            </motion.div>
+              item={item}
+              expandedId={expandedId}
+              onExpand={setExpandedId}
+            />
           ))}
-        </motion.div>
+        </div>
       )}
 
       {/* 무한 스크롤 센티넬 */}

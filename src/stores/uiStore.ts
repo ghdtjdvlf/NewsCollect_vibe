@@ -54,6 +54,8 @@ export const useUIStore = create<UIState>()(
         searchHistory: state.searchHistory,
         autoRefresh: state.autoRefresh,
       }),
+      // SSR 하이드레이션 불일치 방지: 서버/클라 첫 렌더를 기본값으로 통일
+      skipHydration: true,
     }
   )
 )
