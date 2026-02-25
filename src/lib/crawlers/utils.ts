@@ -1,7 +1,15 @@
 import type { NewsCategory } from '@/types/news'
+import { createHash } from 'crypto'
 
 let counter = 0
 
+// URL 기반 안정적 ID — 같은 기사는 항상 같은 ID 반환
+export function stableId(url: string, prefix = 'n'): string {
+  const hash = createHash('md5').update(url).digest('hex').slice(0, 12)
+  return `${prefix}_${hash}`
+}
+
+// 하위 호환: URL 없는 경우에만 사용
 export function randomId(prefix = 'n'): string {
   return `${prefix}_${Date.now()}_${(++counter).toString(36)}`
 }

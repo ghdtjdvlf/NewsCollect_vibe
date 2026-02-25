@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { randomId, toIso, guessCategory } from './utils'
+import { stableId, toIso, guessCategory } from './utils'
 
 // 다음 뉴스 섹션 경로
 const DAUM_SECTION: Partial<Record<NewsCategory, string>> = {
@@ -72,7 +72,7 @@ export async function fetchDaumSection(
       const summary = $(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text().trim() || undefined
 
       items.push({
-        id: randomId('d'),
+        id: stableId(fullUrl, 'd'),
         title,
         summary,
         url: fullUrl,
