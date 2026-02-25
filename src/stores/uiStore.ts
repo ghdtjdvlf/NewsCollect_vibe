@@ -13,6 +13,10 @@ interface UIState {
   selectedCategory: NewsCategory | undefined
   setSelectedCategory: (cat: NewsCategory | undefined) => void
 
+  // 실시간 자동 업데이트 토글
+  autoRefresh: boolean
+  setAutoRefresh: (v: boolean) => void
+
   // 검색 히스토리 (localStorage 영속)
   searchHistory: string[]
   addSearchHistory: (kw: string) => void
@@ -29,13 +33,13 @@ export const useUIStore = create<UIState>()(
       selectedCategory: undefined,
       setSelectedCategory: (cat) => set({ selectedCategory: cat }),
 
+      autoRefresh: true,
+      setAutoRefresh: (v) => set({ autoRefresh: v }),
+
       searchHistory: [],
       addSearchHistory: (kw) =>
         set((state) => ({
-          searchHistory: [kw, ...state.searchHistory.filter((h) => h !== kw)].slice(
-            0,
-            MAX_HISTORY
-          ),
+          searchHistory: [kw, ...state.searchHistory.filter((h) => h !== kw)].slice(0, MAX_HISTORY),
         })),
       clearSearchHistory: () => set({ searchHistory: [] }),
       removeSearchHistory: (kw) =>
@@ -45,8 +49,11 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: 'liquid-news-ui',
-      // activeTab은 세션마다 초기화, 히스토리만 영속
-      partialize: (state) => ({ searchHistory: state.searchHistory }),
+      // autoRefresh, searchHistory만 영속
+      partialize: (state) => ({
+        searchHistory: state.searchHistory,
+        autoRefresh: state.autoRefresh,
+      }),
     }
   )
 )

@@ -67,12 +67,14 @@ export async function fetchDaumSection(
       // v.daum.net URL은 그대로 사용 (리다이렉트 없음)
       const fullUrl = link.startsWith('http') ? link : `https://news.daum.net${link}`
 
-      // 날짜 추출
+      // 날짜 + 본문 미리보기 추출
       const dateText = $(el).find('.info_view, .txt_time').text().trim()
+      const summary = $(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text().trim() || undefined
 
       items.push({
         id: randomId('d'),
         title,
+        summary,
         url: fullUrl,
         source: 'daum',
         sourceName: $(el).find('.info_cp, .txt_cp').text().trim() || '다음뉴스',

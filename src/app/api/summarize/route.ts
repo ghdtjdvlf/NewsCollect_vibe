@@ -28,14 +28,13 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' })
 
     const content = [title, summary].filter(Boolean).join('\n\n')
-    const prompt = `다음 뉴스를 3줄로 요약해주세요.  
+    const prompt = `
+    다음 뉴스를 3줄로 요약해주세요.  
     말투는 음슴체를 사용
     각 줄은 핵심 내용을 담아야 합니다. 
     무조건 뉴스에서 내용을 가져와야함.
     어려운 말들을 쉬운말로 바꿔서 요약.
-    번호 없이 줄바꿈으로만 구분해주세요.
-    마지막 줄에는 이해를 돕기 위한 결론을 적절한 비유로 표현해주세요.
-    
+    3줄 요약 아래쪽에 "결론 :  (이해하기 쉽게 비유해서 요약한내용)" 을 추가해줘.
     
     \n\n${content}${url ? `\n출처: ${url}` : ''}`
 

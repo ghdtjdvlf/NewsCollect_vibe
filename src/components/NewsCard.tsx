@@ -1,23 +1,16 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import Link from 'next/link'
-import { Clock, MessageSquare, TrendingUp, ExternalLink, Eye, Sparkles, Loader2 } from 'lucide-react'
+import { Clock, MessageSquare, TrendingUp, ExternalLink, Eye, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { NewsItem } from '@/types/news'
 
-function toSlug(id: string) {
-  return encodeURIComponent(id)
-}
-
-// [애니메이션] 뉴스 클릭 시 통통 튀는 spring → ease-in으로 교체
 const cardTransition = { ease: 'easeInOut', duration: 0.25 }
 
 interface NewsCardProps {
   item: NewsItem
   className?: string
-  // [아코디언] 부모가 현재 열린 ID를 관리
   expandedId?: string | null
   onExpand?: (id: string | null) => void
 }
@@ -56,70 +49,85 @@ const CATEGORY_THUMB_BG: Record<string, string> = {
   기타: 'from-gray-300 to-gray-500',
 }
 
-// 메모리 캐시 (세션 유지, 최대 300개)
-const thumbCache = new Map<string, string | null>()
+// 썸네일 + description 메모리 캐시 (최대 300개)
+const thumbCache = new Map<string, { thumbnail: string | null; description: string | null }>()
 
 export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProps) {
-  // [아코디언] 부모가 넘겨준 expandedId 기반으로 열림 여부 결정
-  const expanded = expandedId !== undefined ? expandedId === item.id : false
+  const controlledExpanded = expandedId !== undefined ? expandedId === item.id : undefined
   const [internalExpanded, setInternalExpanded] = useState(false)
-  // expandedId prop 없으면 자체 관리
-  const isExpanded = expandedId !== undefined ? expanded : internalExpanded
+  const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded
 
-  // [AI 3줄 요약] 상태
+  // 썸네일
+  const [lazyThumb, setLazyThumb] = useState<string | null>(null)
+  const [lazyDesc, setLazyDesc] = useState<string | null>(null)
+  const [thumbLoading, setThumbLoading] = useState(false)
+  // 브라우저 이미지 로드 실패 (핫링크 차단 등)
+  const [imgFailed, setImgFailed] = useState(false)
+
+  // AI 3줄 요약
   const [summaryLines, setSummaryLines] = useState<string[] | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
-  const [summaryError, setSummaryError] = useState(false)
-  const [summaryErrorMsg, setSummaryErrorMsg] = useState('')
+  const [summaryError, setSummaryError] = useState('')
 
-  const [lazyThumb, setLazyThumb] = useState<string | null>(null)
-  const [thumbLoading, setThumbLoading] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const summarizeCalledRef = useRef(false)
+
+  const collapse = useCallback(() => {
+    if (onExpand) onExpand(null)
+    else setInternalExpanded(false)
+  }, [onExpand])
 
   function handleToggle() {
-    if (onExpand) {
-      // 이미 열려 있으면 닫기, 아니면 열기 (다른 카드 자동 닫힘)
-      onExpand(isExpanded ? null : item.id)
-    } else {
-      setInternalExpanded((v) => !v)
-    }
+    if (onExpand) onExpand(isExpanded ? null : item.id)
+    else setInternalExpanded((v) => !v)
   }
 
-  async function handleSummarize(e: React.MouseEvent) {
-    e.stopPropagation()
-    if (summaryLines || summaryLoading) return
-    setSummaryLoading(true)
-    setSummaryError(false)
-    try {
-      const res = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: item.title, summary: item.summary, url: item.url }),
-      })
-      const data = await res.json() as { lines?: string[]; error?: string }
-      if (data.lines && data.lines.length > 0) {
-        setSummaryLines(data.lines)
-      } else {
-        // error 메시지를 에러 상태로 저장
-        setSummaryError(true)
-        setSummaryErrorMsg(data.error ?? '요약에 실패했습니다.')
-      }
-    } catch {
-      setSummaryError(true)
-      setSummaryErrorMsg('네트워크 오류가 발생했습니다.')
-    } finally {
-      setSummaryLoading(false)
-    }
-  }
-
+  // 카드 열릴 때 3줄 요약 자동 실행
   useEffect(() => {
-    if (item.thumbnail) return
+    if (!isExpanded) return
+    if (summarizeCalledRef.current) return
+    summarizeCalledRef.current = true
 
+    setSummaryLoading(true)
+    setSummaryError('')
+
+    fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
+    })
+      .then((r) => r.json())
+      .then((data: { lines?: string[]; error?: string }) => {
+        if (data.lines && data.lines.length > 0) setSummaryLines(data.lines)
+        else setSummaryError(data.error ?? '요약에 실패했습니다.')
+      })
+      .catch(() => setSummaryError('네트워크 오류가 발생했습니다.'))
+      .finally(() => setSummaryLoading(false))
+  }, [isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 열린 카드가 뷰포트에서 완전히 사라지면 자동 닫힘
+  useEffect(() => {
+    if (!isExpanded) return
+    const el = wrapRef.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      (entries) => { if (!entries[0].isIntersecting) collapse() },
+      { threshold: 0 }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [isExpanded, collapse])
+
+  // 썸네일 + description lazy load
+  useEffect(() => {
     const cached = thumbCache.get(item.id)
     if (cached !== undefined) {
-      setLazyThumb(cached)
+      setLazyThumb(cached.thumbnail)
+      setLazyDesc(cached.description)
       return
     }
+    if (item.thumbnail && item.summary) return
 
     const el = wrapRef.current
     if (!el) return
@@ -132,34 +140,38 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
 
         fetch(`/api/thumbnail?url=${encodeURIComponent(item.url)}`)
           .then((r) => r.json())
-          .then((data: { thumbnail: string | null }) => {
-            const thumb = data.thumbnail ?? null
-            // 캐시 크기 제한
+          .then((data: { thumbnail: string | null; description: string | null }) => {
+            const result = { thumbnail: data.thumbnail ?? null, description: data.description ?? null }
             if (thumbCache.size >= 300) {
               const firstKey = thumbCache.keys().next().value
               if (firstKey) thumbCache.delete(firstKey)
             }
-            thumbCache.set(item.id, thumb)
-            setLazyThumb(thumb)
+            thumbCache.set(item.id, result)
+            setLazyThumb(result.thumbnail)
+            setLazyDesc(result.description)
           })
-          .catch(() => {
-            thumbCache.set(item.id, null)
-          })
+          .catch(() => thumbCache.set(item.id, { thumbnail: null, description: null }))
           .finally(() => setThumbLoading(false))
       },
       { threshold: 0.1 }
     )
-
     observer.observe(el)
     return () => observer.disconnect()
-  }, [item.id, item.url, item.thumbnail])
+  }, [item.id, item.url, item.thumbnail, item.summary])
 
-  // Google News 공통 플레이스홀더 이미지 필터링
+  // 이미지 로드 실패 → gradient fallback + 캐시 무효화
+  function handleImgError() {
+    setImgFailed(true)
+    const cached = thumbCache.get(item.id)
+    if (cached) thumbCache.set(item.id, { ...cached, thumbnail: null })
+  }
+
   const isGenericGoogleThumb = (src: string | null | undefined) =>
     src?.includes('J6_coFbogx') ?? false
 
   const rawThumb = item.thumbnail ?? lazyThumb
-  const thumbnail = isGenericGoogleThumb(rawThumb) ? null : rawThumb
+  const thumbnail = imgFailed || isGenericGoogleThumb(rawThumb) ? null : rawThumb
+  const bodyText = item.summary || lazyDesc
   const thumbGradient = CATEGORY_THUMB_BG[item.category] ?? CATEGORY_THUMB_BG['기타']
 
   return (
@@ -176,7 +188,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
         )}
         whileTap={{ scale: 0.98 }}
       >
-        {/* 썸네일 영역 */}
+        {/* 썸네일 */}
         {thumbnail ? (
           <motion.div
             layout
@@ -190,29 +202,24 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
               alt={item.title}
               className="absolute inset-0 w-full h-full object-cover"
               loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={handleImgError}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
           </motion.div>
         ) : thumbLoading ? (
           <div className="shimmer h-20 w-full" />
         ) : (
-          // 카테고리 컬러 1px 상단 스트라이프
           <div className={cn('w-full h-1 bg-gradient-to-r', thumbGradient)} />
         )}
 
         <div className="p-4 space-y-2">
           {/* 카테고리 + 출처 */}
           <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                'text-xs px-2 py-0.5 rounded-full font-medium',
-                CATEGORY_COLORS[item.category] ?? CATEGORY_COLORS['기타']
-              )}
-            >
+            <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', CATEGORY_COLORS[item.category] ?? CATEGORY_COLORS['기타'])}>
               {item.category}
             </span>
-            <span className="text-xs text-gray-400">{item.sourceName}</span>
-
+            <span className="text-xs text-gray-400 font-bold">{item.sourceName}</span>
             {item.trendScore !== undefined && (
               <span className="ml-auto flex items-center gap-1 text-xs text-orange-500 font-medium">
                 <TrendingUp className="w-3 h-3" />
@@ -224,18 +231,15 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
           {/* 제목 */}
           <motion.h2
             layout
-            className={cn(
-              'font-semibold text-gray-900 leading-snug',
-              isExpanded ? 'text-base' : 'text-sm line-clamp-2'
-            )}
+            className={cn('font-semibold text-gray-900 leading-snug', isExpanded ? 'text-base' : 'text-sm line-clamp-2')}
             transition={cardTransition}
           >
             {item.title}
           </motion.h2>
 
-          {/* 확장 시 요약 */}
+          {/* 확장 시 본문 */}
           <AnimatePresence>
-            {isExpanded && item.summary && (
+            {isExpanded && bodyText && (
               <motion.p
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
@@ -243,7 +247,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
                 transition={{ duration: 0.2 }}
                 className="text-sm text-gray-500 leading-relaxed"
               >
-                {item.summary}
+                {bodyText}
               </motion.p>
             )}
           </AnimatePresence>
@@ -254,44 +258,27 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
               <Clock className="w-3 h-3" />
               {formatRelativeTime(item.publishedAt)}
             </span>
-
             {item.commentCount !== undefined && (
               <span className="flex items-center gap-1">
                 <MessageSquare className="w-3 h-3" />
                 {item.commentCount.toLocaleString()}
               </span>
             )}
-
-            {/* [정보 표시] 실제 조회수 연동 */}
             {item.viewCount !== undefined && (
               <span className="flex items-center gap-1">
                 <Eye className="w-3 h-3" />
                 {item.viewCount.toLocaleString()}
               </span>
             )}
-
             <AnimatePresence>
               {isExpanded && (
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
-                  className="ml-auto flex items-center gap-3"
+                  className="ml-auto"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {/* [AI 요약] '상세보기' → '3줄 요약' */}
-                  <button
-                    onClick={handleSummarize}
-                    disabled={summaryLoading || !!summaryLines}
-                    className="flex items-center gap-1 text-indigo-500 hover:text-indigo-600 disabled:opacity-50"
-                  >
-                    {summaryLoading ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Sparkles className="w-3 h-3" />
-                    )}
-                    {summaryLoading ? '요약 중...' : summaryLines ? '요약 완료' : '3줄 요약'}
-                  </button>
                   <a
                     href={item.url}
                     target="_blank"
@@ -305,15 +292,15 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
             </AnimatePresence>
           </div>
 
-          {/* [AI 3줄 요약] 결과 표시 */}
+          {/* AI 3줄 요약 */}
           <AnimatePresence>
-            {isExpanded && (summaryLines || summaryLoading || summaryError) && (
+            {isExpanded && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
                 transition={{ duration: 0.2 }}
-                className="pt-2 border-t border-indigo-50 space-y-1.5"
+                className="pt-2 border-t border-indigo-50"
                 onClick={(e) => e.stopPropagation()}
               >
                 {summaryLoading && (
@@ -322,8 +309,8 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
                     야무지게 요약 중이에요...
                   </p>
                 )}
-                {summaryError && (
-                  <p className="text-xs text-red-400">{summaryErrorMsg || '요약에 실패했습니다.'}</p>
+                {summaryError && !summaryLoading && (
+                  <p className="text-xs text-red-400">{summaryError}</p>
                 )}
                 {summaryLines && (
                   <>
@@ -335,14 +322,14 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
                         </li>
                       ))}
                     </ol>
-                    <p className="text-[10px] text-gray-300">AI가 뉴스 원문을 파악하고 요약합니다.</p>
+                    <p className="text-[10px] text-gray-300 mt-1">AI가 뉴스 원문을 파악하고 요약합니다.</p>
                   </>
                 )}
               </motion.div>
             )}
           </AnimatePresence>
 
-          {/* 커뮤니티 언급 */}
+          {/* 커뮤니티 반응 */}
           <AnimatePresence>
             {isExpanded && item.communityMentions && item.communityMentions.length > 0 && (
               <motion.div
@@ -362,9 +349,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
                     onClick={(e) => e.stopPropagation()}
                     className="flex items-center gap-2 text-xs text-gray-500 hover:text-gray-800"
                   >
-                    <span className="text-gray-300 uppercase text-[10px] w-14 shrink-0">
-                      {mention.source}
-                    </span>
+                    <span className="text-gray-300 uppercase text-[10px] w-14 shrink-0">{mention.source}</span>
                     <span className="truncate">{mention.postTitle}</span>
                     <span className="shrink-0 text-gray-300">{mention.commentCount}</span>
                   </a>

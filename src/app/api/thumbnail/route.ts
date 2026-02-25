@@ -6,17 +6,17 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get('url')
-  if (!url) return NextResponse.json({ thumbnail: null })
+  if (!url) return NextResponse.json({ thumbnail: null, description: null })
 
   // SSRF 방어: http/https 스킴만 허용
   let parsed: URL
   try {
     parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return NextResponse.json({ thumbnail: null })
+      return NextResponse.json({ thumbnail: null, description: null })
     }
   } catch {
-    return NextResponse.json({ thumbnail: null })
+    return NextResponse.json({ thumbnail: null, description: null })
   }
 
   // Google News URL은 리다이렉트를 따라가 실제 기사 URL을 얻음
@@ -27,15 +27,14 @@ export async function GET(req: NextRequest) {
         redirect: 'follow',
         signal: AbortSignal.timeout(5000),
       })
-      if (!redirectRes.ok) return NextResponse.json({ thumbnail: null })
+      if (!redirectRes.ok) return NextResponse.json({ thumbnail: null, description: null })
       const finalUrl = new URL(redirectRes.url)
-      // 리다이렉트 후에도 Google 도메인이면 포기
       if (finalUrl.hostname.includes('google.com')) {
-        return NextResponse.json({ thumbnail: null })
+        return NextResponse.json({ thumbnail: null, description: null })
       }
       parsed = finalUrl
     } catch {
-      return NextResponse.json({ thumbnail: null })
+      return NextResponse.json({ thumbnail: null, description: null })
     }
   }
 
@@ -50,27 +49,24 @@ export async function GET(req: NextRequest) {
       redirect: 'follow',
     })
 
-    if (!res.ok) return NextResponse.json({ thumbnail: null })
+    if (!res.ok) return NextResponse.json({ thumbnail: null, description: null })
 
-    // Content-Type 확인 후 HTML만 파싱
     const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('html')) return NextResponse.json({ thumbnail: null })
+    if (!ct.includes('html')) return NextResponse.json({ thumbnail: null, description: null })
 
-    // 전체 파싱 대신 앞부분(헤더 영역)만 읽음
     const reader = res.body?.getReader()
-    if (!reader) return NextResponse.json({ thumbnail: null })
+    if (!reader) return NextResponse.json({ thumbnail: null, description: null })
 
     let html = ''
     while (html.length < 30000) {
       const { done, value } = await reader.read()
       if (done) break
       html += new TextDecoder().decode(value)
-      // <head> 종료 이후는 불필요
       if (html.includes('</head>')) break
     }
     reader.cancel()
 
-    // og:image 추출 (두 가지 속성 순서 대응)
+    // og:image 추출
     const ogImage =
       html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
       html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1] ??
@@ -78,7 +74,13 @@ export async function GET(req: NextRequest) {
       html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i)?.[1] ??
       null
 
-    // 상대 경로를 절대 경로로 변환
+    // og:description 추출 (본문 요약으로 사용)
+    const ogDesc =
+      html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)?.[1] ??
+      html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      null
+
     let thumbnail: string | null = null
     if (ogImage) {
       try {
@@ -88,15 +90,15 @@ export async function GET(req: NextRequest) {
       }
     }
 
+    const description = ogDesc
+      ? ogDesc.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim()
+      : null
+
     return NextResponse.json(
-      { thumbnail },
-      {
-        headers: {
-          'Cache-Control': 'public, max-age=3600, s-maxage=3600',
-        },
-      }
+      { thumbnail, description },
+      { headers: { 'Cache-Control': 'public, max-age=3600, s-maxage=3600' } }
     )
   } catch {
-    return NextResponse.json({ thumbnail: null })
+    return NextResponse.json({ thumbnail: null, description: null })
   }
 }

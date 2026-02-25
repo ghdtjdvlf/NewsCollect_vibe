@@ -61,10 +61,13 @@ export async function fetchNaverSection(
 
       const press = $(el).find('.sa_text_press').text().trim() || '네이버뉴스'
       const dateText = $(el).find('.sa_text_datetime_bullet').text().trim()
+      // 기사 본문 미리보기 (이미지와 함께 수집)
+      const summary = $(el).find('.sa_text_lede, .sa_desc, .lede').text().trim() || undefined
 
       items.push({
         id: randomId('n'),
         title,
+        summary,
         url: link,
         source: 'naver',
         sourceName: press,

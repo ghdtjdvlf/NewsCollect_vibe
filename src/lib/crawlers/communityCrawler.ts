@@ -103,62 +103,96 @@ export async function fetchDcinsideBest(limit = 30): Promise<CommunityPost[]> {
 export async function fetchFmkoreaBest(limit = 30): Promise<CommunityPost[]> {
   const start = Date.now()
 
-  try {
-    const html = await fetchWithRetry('https://www.fmkorea.com/best', {
-      timeout: 8000,
-      headers: { Referer: 'https://www.fmkorea.com/' },
-    })
+  // FMKorea는 여러 URL을 시도
+  const urls = [
+    'https://www.fmkorea.com/best',
+    'https://www.fmkorea.com/index.php?mid=best',
+  ]
 
-    const $ = load(html)
-    const posts: CommunityPost[] = []
-
-    $('li.li_best, .fm_best_widget ul li, table.bd_lst tr').each((_, el) => {
-      if (posts.length >= limit) return false
-
-      const titleEl = $(el).find('a.hotdeal_var8, a.title, .title a, td.title a').first()
-      const title = titleEl.text().trim()
-      const href = titleEl.attr('href') ?? ''
-      const commentText = $(el).find('.num_comment, .comment_count').text().replace(/\D/g, '')
-      const viewText = $(el).find('.num_hit, .hit').text().replace(/\D/g, '')
-
-      if (!title || title.length < 3) return
-
-      const fullUrl = href.startsWith('http') ? href : `https://www.fmkorea.com${href}`
-
-      posts.push({
-        source: 'fmkorea',
-        postTitle: title,
-        postUrl: fullUrl,
-        commentCount: parseInt(commentText) || 0,
-        viewCount: parseInt(viewText) || 0,
-        keywords: extractKeywords(title),
+  for (const url of urls) {
+    try {
+      const html = await fetchWithRetry(url, {
+        timeout: 10000,
+        headers: {
+          Referer: 'https://www.fmkorea.com/',
+          Cookie: 'fm_visited=1',
+        },
       })
-    })
 
-    logCrawl({
-      source: 'fmkorea',
-      method: 'playwright',
-      collected: posts.length,
-      deduplicated: posts.length,
-      filtered: posts.length,
-      failed: 0,
-      duration_ms: Date.now() - start,
-    })
+      const $ = load(html)
+      const posts: CommunityPost[] = []
 
-    return posts
-  } catch (err) {
-    logCrawl({
-      source: 'fmkorea',
-      method: 'playwright',
-      collected: 0,
-      deduplicated: 0,
-      filtered: 0,
-      failed: 1,
-      duration_ms: Date.now() - start,
-    })
-    console.error('[FMKorea] 실패:', err)
-    return []
+      // FMKorea best 페이지의 다양한 셀렉터 시도
+      const rows = $([
+        'ul.fm_best_widget > li',
+        '.fm_best_widget li',
+        'table.bd_lst tbody tr',
+        '.best_list li',
+        'li.li_best',
+        '.hotdeal_info',
+      ].join(', '))
+
+      rows.each((_, el) => {
+        if (posts.length >= limit) return false
+
+        // 제목 링크: 여러 패턴 시도
+        const titleEl = $(el).find([
+          'h3.title a',
+          'a.hotdeal_var8',
+          'a.title',
+          '.title a',
+          'td.title a',
+          'a[href*="/"][class*="title"]',
+          'a[href^="/"]',
+        ].join(', ')).first()
+
+        const title = titleEl.text().trim().replace(/\s+/g, ' ')
+        const href = titleEl.attr('href') ?? ''
+
+        if (!title || title.length < 3 || !href) return
+
+        const commentText = $(el).find('.num_comment, .comment_count, .replynum').text().replace(/\D/g, '')
+        const viewText = $(el).find('.num_hit, .hit, .read_count').text().replace(/\D/g, '')
+
+        const fullUrl = href.startsWith('http') ? href : `https://www.fmkorea.com${href}`
+
+        posts.push({
+          source: 'fmkorea',
+          postTitle: title,
+          postUrl: fullUrl,
+          commentCount: parseInt(commentText) || 0,
+          viewCount: parseInt(viewText) || 0,
+          keywords: extractKeywords(title),
+        })
+      })
+
+      if (posts.length > 0) {
+        logCrawl({
+          source: 'fmkorea',
+          method: 'playwright',
+          collected: posts.length,
+          deduplicated: posts.length,
+          filtered: posts.length,
+          failed: 0,
+          duration_ms: Date.now() - start,
+        })
+        return posts
+      }
+    } catch (err) {
+      console.error(`[FMKorea] ${url} 실패:`, err)
+    }
   }
+
+  logCrawl({
+    source: 'fmkorea',
+    method: 'playwright',
+    collected: 0,
+    deduplicated: 0,
+    filtered: 0,
+    failed: 1,
+    duration_ms: Date.now() - start,
+  })
+  return []
 }
 
 // ─── 클리앙 인기게시물 ────────────────────────────────────

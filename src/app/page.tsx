@@ -1,6 +1,6 @@
 'use client'
 
-import { AnimatePresence, motion, useMotionValue, useTransform } from 'framer-motion'
+import { motion, useMotionValue, useTransform } from 'framer-motion'
 import { BlobBackground } from '@/components/ui/BlobBackground'
 import { Header } from '@/components/layout/Header'
 import { TabBar } from '@/components/layout/TabBar'
@@ -43,55 +43,42 @@ export default function Home() {
         onDragEnd={handleDragEnd}
         style={{ opacity: dragOpacity }}
       >
-        <AnimatePresence mode="wait">
-          {activeTab === 'trending' && (
-            <motion.div
-              key="trending"
-              initial={{ opacity: 0, x: -16 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 16 }}
-              transition={{ duration: 0.22 }}
-            >
-              <SectionTitle icon="🔥" title="실시간 화제뉴스" />
-              <ErrorBoundary name="TrendingTab">
-                <TrendingTab />
-              </ErrorBoundary>
-            </motion.div>
-          )}
+        {/*
+          탭을 AnimatePresence로 언마운트하면 진행 중인 fetch가 취소됨.
+          display: none으로 숨기기만 해서 React Query 상태를 유지.
+        */}
+        <div
+          className="transition-opacity duration-200"
+          style={{ display: activeTab === 'trending' ? undefined : 'none' }}
+        >
+          <SectionTitle icon="🔥" title="실시간 화제뉴스" />
+          <ErrorBoundary name="TrendingTab">
+            <TrendingTab />
+          </ErrorBoundary>
+        </div>
 
-          {activeTab === 'latest' && (
-            <motion.div
-              key="latest"
-              initial={{ opacity: 0, x: -16 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 16 }}
-              transition={{ duration: 0.22 }}
-            >
-              <SectionTitle icon="📰" title="최신뉴스" />
-              <ErrorBoundary name="LatestTab">
-                <LatestTab
-                  selectedCategory={selectedCategory}
-                  onCategoryChange={setSelectedCategory}
-                />
-              </ErrorBoundary>
-            </motion.div>
-          )}
+        <div
+          className="transition-opacity duration-200"
+          style={{ display: activeTab === 'latest' ? undefined : 'none' }}
+        >
+          <SectionTitle icon="📰" title="최신뉴스" />
+          <ErrorBoundary name="LatestTab">
+            <LatestTab
+              selectedCategory={selectedCategory}
+              onCategoryChange={setSelectedCategory}
+            />
+          </ErrorBoundary>
+        </div>
 
-          {activeTab === 'search' && (
-            <motion.div
-              key="search"
-              initial={{ opacity: 0, x: -16 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 16 }}
-              transition={{ duration: 0.22 }}
-            >
-              <SectionTitle icon="🔍" title="검색" />
-              <ErrorBoundary name="SearchTab">
-                <SearchTab />
-              </ErrorBoundary>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div
+          className="transition-opacity duration-200"
+          style={{ display: activeTab === 'search' ? undefined : 'none' }}
+        >
+          <SectionTitle icon="🔍" title="검색" />
+          <ErrorBoundary name="SearchTab">
+            <SearchTab />
+          </ErrorBoundary>
+        </div>
       </motion.main>
 
       <TabBar active={activeTab} onChange={setActiveTab} />
