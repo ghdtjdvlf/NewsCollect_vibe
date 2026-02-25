@@ -28,6 +28,25 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>()
 
+// ─── 기사 아이템 캐시 (상세 페이지용) ────────────────────
+const ITEM_CACHE_MAX = 500
+const itemCache = new Map<string, NewsItem>()
+
+function cacheNewsItems(items: NewsItem[]) {
+  for (const item of items) {
+    itemCache.set(item.id, item)
+  }
+  // 크기 초과 시 오래된 항목 제거
+  if (itemCache.size > ITEM_CACHE_MAX) {
+    const toDelete = [...itemCache.keys()].slice(0, 100)
+    toDelete.forEach((k) => itemCache.delete(k))
+  }
+}
+
+export function getCachedNewsItem(id: string): NewsItem | undefined {
+  return itemCache.get(id)
+}
+
 function getCache<T>(key: string): T | null {
   const entry = cache.get(key) as CacheEntry<T> | undefined
   if (!entry) return null
@@ -67,6 +86,8 @@ export async function getTrendingNews(): Promise<TrendingResponse> {
   const deduplicated = processNewsItems(rawNews)
   const trending = filterTrendingNews(deduplicated, communityPosts, 0, 20)
 
+  cacheNewsItems(trending)
+
   const response: TrendingResponse = {
     items: trending,
     updatedAt: new Date().toISOString(),
@@ -86,8 +107,13 @@ export async function getLatestNews(
   const cached = getCache<NewsResponse>(cacheKey)
   if (cached) return cached
 
+  // 전용 크롤링 섹션 없는 카테고리는 관련 섹션에서 수집 후 필터링
+  const CRAWL_FALLBACK: Partial<Record<NewsCategory, NewsCategory[]>> = {
+    '사건사고': ['사회', '정치'],
+    '기타': ['사회', '경제'],
+  }
   const targetCategories: NewsCategory[] = category
-    ? [category]
+    ? (CRAWL_FALLBACK[category] ?? [category])
     : ['경제', '사회', '사건사고', '정치', 'IT/과학']
 
   // 최대 12초 내에 수집 — Naver/Daum HTML 크롤링 우선 (이미지 포함)
@@ -107,6 +133,8 @@ export async function getLatestNews(
   if (category) {
     items = items.filter((item) => item.category === category)
   }
+
+  cacheNewsItems(items)
 
   const total = items.length
   const start = (page - 1) * limit
@@ -170,6 +198,7 @@ export async function searchNews(
       : items
 
   const deduplicated = processNewsItems(sorted)
+  cacheNewsItems(deduplicated)
   const clusters = clusterByTopic(deduplicated, keyword).map((c) => ({
     id: randomId('cl'),
     topic: keyword,

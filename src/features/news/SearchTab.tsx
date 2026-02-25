@@ -11,6 +11,7 @@ import { cn } from '@/lib/cn'
 export function SearchTab() {
   const [keyword, setKeyword] = useState('')
   const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const { searchHistory, addSearchHistory, clearSearchHistory, removeSearchHistory } =
@@ -158,13 +159,15 @@ export function SearchTab() {
 
               {data?.clusters.map((cluster) => (
                 <div key={cluster.id} className="space-y-2">
-                  <NewsCard item={cluster.representative} />
+                  <NewsCard item={cluster.representative} expandedId={expandedId} onExpand={setExpandedId} />
                   {cluster.related.length > 0 && (
                     <div className="ml-4 space-y-2">
                       {cluster.related.slice(0, 2).map((item) => (
                         <NewsCard
                           key={item.id}
                           item={item}
+                          expandedId={expandedId}
+                          onExpand={setExpandedId}
                           className="opacity-70 scale-[0.98] origin-left"
                         />
                       ))}

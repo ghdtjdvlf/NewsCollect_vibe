@@ -38,17 +38,27 @@ export async function fetchDcinsideBest(limit = 30): Promise<CommunityPost[]> {
       $('tr.ub-content, .gall_list tr, tr[data-no]').each((_, el) => {
         if (posts.length >= limit) return false
 
-        const titleEl = $(el).find('.gall_tit a:not(.reply_num), .ub-word')
+        // .ub-word는 span이라 href 없음 → a 태그만 명시적으로 선택
+        const titleEl = $(el).find('.gall_tit a:not(.reply_num)').first()
         const title = titleEl.text().trim()
         const href = titleEl.attr('href') ?? ''
         const commentText = $(el).find('.reply_num, .gall_comment').text().replace(/\D/g, '')
         const viewText = $(el).find('.gall_count').text().replace(/\D/g, '')
 
-        if (!title || title.length < 3) return
+        // href가 비어있으면 메인 페이지로 잘못 이동하므로 skip
+        if (!title || title.length < 3 || !href) return
 
-        const fullUrl = href.startsWith('http')
-          ? href
-          : `https://gall.dcinside.com${href}`
+        // 상대 경로 처리: /board/view/... 또는 ?no=... 형태
+        let fullUrl: string
+        if (href.startsWith('http')) {
+          fullUrl = href
+        } else if (href.startsWith('/')) {
+          fullUrl = `https://gall.dcinside.com${href}`
+        } else if (href.startsWith('?')) {
+          fullUrl = `https://gall.dcinside.com/board/view/${href}`
+        } else {
+          fullUrl = `https://gall.dcinside.com/${href}`
+        }
 
         posts.push({
           source: 'dcinside',

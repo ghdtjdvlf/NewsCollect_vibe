@@ -8,7 +8,9 @@ export function useTrendingNews() {
     queryKey: ['trending'],
     queryFn: newsApi.getTrending,
     staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,       // 탭 전환 후 5분간 캐시 유지
     refetchInterval: 60 * 1000,
+    retry: 1,
   })
 }
 
@@ -22,6 +24,8 @@ export function useLatestNews(params: Omit<FetchNewsParams, 'page'> = {}) {
       lastPage.hasMore ? lastPage.page + 1 : undefined,
     initialPageParam: 1,
     staleTime: 60 * 1000,
+    gcTime: 5 * 60 * 1000,       // 탭 전환 후 5분간 캐시 유지 (Fix: 탭 이동 데이터 로딩 정지)
+    retry: 1,
   })
 }
 
@@ -32,5 +36,7 @@ export function useSearchNews(params: SearchParams) {
     queryFn: () => newsApi.search(params),
     enabled: params.keyword.trim().length > 0,
     staleTime: 30 * 1000,
+    gcTime: 3 * 60 * 1000,
+    retry: 1,
   })
 }

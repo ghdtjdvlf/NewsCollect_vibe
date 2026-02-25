@@ -1,12 +1,12 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import { NewsCard } from '@/components/NewsCard'
 import { useLatestNews } from './useNewsQuery'
 import type { NewsCategory } from '@/types/news'
 
-const CATEGORIES: (NewsCategory | '전체')[] = ['전체', '경제', '사건사고', '사회', '정치']
+const BASE_CATEGORIES: (NewsCategory | '전체')[] = ['전체', '경제', '사건사고', '사회', '정치']
 
 interface LatestTabProps {
   selectedCategory?: NewsCategory
@@ -18,6 +18,19 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
     useLatestNews({ category: selectedCategory })
 
   const sentinelRef = useRef<HTMLDivElement>(null)
+  // 아코디언: 현재 펼쳐진 카드 ID
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+
+  // Fix: p.items 가 undefined 일 때 flatMap 오류 방지
+  const allItems = data?.pages.flatMap((p) => p.items ?? []) ?? []
+
+  // 로드된 아이템에서 카테고리 동적 수집 (Fix: 카테고리 태그 동기화)
+  const displayCategories = useMemo(() => {
+    const extra = allItems
+      .map((item) => item.category)
+      .filter((cat, idx, arr) => !BASE_CATEGORIES.includes(cat) && arr.indexOf(cat) === idx)
+    return [...BASE_CATEGORIES, ...extra]
+  }, [allItems])
 
   // 무한 스크롤
   useEffect(() => {
@@ -37,13 +50,11 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
     return () => observer.disconnect()
   }, [fetchNextPage, hasNextPage, isFetchingNextPage])
 
-  const allItems = data?.pages.flatMap((p) => p.items) ?? []
-
   return (
     <div className="space-y-3">
       {/* 카테고리 필터 */}
       <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
-        {CATEGORIES.map((cat) => {
+        {displayCategories.map((cat) => {
           const isActive = cat === '전체' ? !selectedCategory : selectedCategory === cat
           return (
             <button
@@ -85,7 +96,11 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(i * 0.04, 0.3) }}
             >
-              <NewsCard item={item} />
+              <NewsCard
+                item={item}
+                expandedId={expandedId}
+                onExpand={setExpandedId}
+              />
             </motion.div>
           ))}
         </motion.div>

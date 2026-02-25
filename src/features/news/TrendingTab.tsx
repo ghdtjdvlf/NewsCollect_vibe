@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { NewsCard } from '@/components/NewsCard'
 import { PullToRefresh } from '@/components/ui/PullToRefresh'
@@ -7,6 +8,7 @@ import { useTrendingNews } from './useNewsQuery'
 
 export function TrendingTab() {
   const { data, isLoading, error, refetch } = useTrendingNews()
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -52,7 +54,7 @@ export function TrendingTab() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
           >
-            <NewsCard item={item} />
+            <NewsCard item={item} expandedId={expandedId} onExpand={setExpandedId} />
           </motion.div>
         ))}
 

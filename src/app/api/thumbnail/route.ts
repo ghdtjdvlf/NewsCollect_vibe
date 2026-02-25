@@ -19,9 +19,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ thumbnail: null })
   }
 
-  // Google News URL은 og:image가 모든 기사에서 동일 → 건너뜀
+  // Google News URL은 리다이렉트를 따라가 실제 기사 URL을 얻음
   if (parsed.hostname === 'news.google.com') {
-    return NextResponse.json({ thumbnail: null })
+    try {
+      const redirectRes = await fetch(parsed.toString(), {
+        headers: { 'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!redirectRes.ok) return NextResponse.json({ thumbnail: null })
+      const finalUrl = new URL(redirectRes.url)
+      // 리다이렉트 후에도 Google 도메인이면 포기
+      if (finalUrl.hostname.includes('google.com')) {
+        return NextResponse.json({ thumbnail: null })
+      }
+      parsed = finalUrl
+    } catch {
+      return NextResponse.json({ thumbnail: null })
+    }
   }
 
   try {
