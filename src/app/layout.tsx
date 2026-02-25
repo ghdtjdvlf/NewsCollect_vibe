@@ -24,8 +24,8 @@ export const metadata: Metadata = {
     url: BASE_URL,
     siteName: '딱!세줄',
     locale: 'ko_KR',
-    title: '딱!세줄: 뉴스는 읽기 귀찮고 세상 돌아가는 건 궁금한 당신을 위해',
-    description: '딱!세줄이 핵심만 짚어 드립니다. 3줄 뉴스 요약과 실시간 커뮤니티 반응을 지금 확인하세요.',
+    title: '딱!세줄 : 3줄 뉴스 요약',
+    description: '3줄 요약과 실시간 커뮤니티 반응을 지금 확인하세요.',
     images: [
       {
         url: '/SEO.png',
