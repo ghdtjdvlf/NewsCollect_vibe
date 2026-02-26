@@ -49,10 +49,18 @@ export async function fetchNaverSection(
 
       if (!title || !link || title.length < 4) return
 
-      // 이미지: data-src 속성 우선
+      // 이미지: 썸네일 링크(a.sa_thumb_link) 내부 img 우선 탐색 → 전체 img fallback
+      // data:... 인라인 플레이스홀더는 제외하고 실제 HTTP URL만 사용
+      const pickSrc = (sel: string) => {
+        const ds = $(el).find(sel).attr('data-src') ?? ''
+        const s  = $(el).find(sel).attr('src') ?? ''
+        const candidate = (!ds.startsWith('data:') && ds) || (!s.startsWith('data:') && s) || ''
+        return candidate || undefined
+      }
       let imgSrc =
-        $(el).find('img').attr('data-src') ||
-        $(el).find('img').attr('src')
+        pickSrc('a.sa_thumb_link img') ??
+        pickSrc('.sa_thumb img, .sa_thumb_inner') ??
+        pickSrc('img')
 
       // 프로토콜 상대 URL(//...) → https 보완
       if (imgSrc?.startsWith('//')) imgSrc = `https:${imgSrc}`
@@ -135,7 +143,9 @@ export async function fetchNaverRanking(limit = 20): Promise<NewsItem[]> {
       const anchor = $(el).find('a').first()
       const title = anchor.text().trim()
       const href = anchor.attr('href') ?? ''
-      let imgSrc = $(el).find('img').attr('data-src') || $(el).find('img').attr('src')
+      const ds2 = $(el).find('img').attr('data-src') ?? ''
+      const s2  = $(el).find('img').attr('src') ?? ''
+      let imgSrc = (!ds2.startsWith('data:') && ds2) || (!s2.startsWith('data:') && s2) || undefined
       if (imgSrc?.startsWith('//')) imgSrc = `https:${imgSrc}`
       const url = href.startsWith('http') ? href : `https://news.naver.com${href}`
 

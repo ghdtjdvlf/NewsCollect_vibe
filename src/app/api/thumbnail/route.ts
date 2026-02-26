@@ -84,7 +84,13 @@ export async function GET(req: NextRequest) {
     let thumbnail: string | null = null
     if (ogImage) {
       try {
-        thumbnail = new URL(ogImage, parsed.origin).toString()
+        const t = new URL(ogImage, parsed.origin).toString()
+        const isGeneric =
+          t.includes('og_image_default') ||
+          t.includes('/static.news/image/news/ogtag/') ||
+          t.includes('noimage') ||
+          t.includes('no_image')
+        thumbnail = isGeneric ? null : t
       } catch {
         thumbnail = null
       }

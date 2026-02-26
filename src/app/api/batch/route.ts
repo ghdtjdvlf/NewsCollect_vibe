@@ -63,7 +63,16 @@ async function fetchArticleMeta(url: string): Promise<{ thumbnail: string | null
 
     let thumbnail: string | null = null
     if (ogImage) {
-      try { thumbnail = new URL(ogImage, parsed.origin).toString() } catch { /* noop */ }
+      try {
+        const t = new URL(ogImage, parsed.origin).toString()
+        // 기본/플레이스홀더 og:image 제외 (언론사 로고, Naver ogtag 기본 이미지 등)
+        const isGeneric =
+          t.includes('og_image_default') ||
+          t.includes('/static.news/image/news/ogtag/') ||
+          t.includes('noimage') ||
+          t.includes('no_image')
+        thumbnail = isGeneric ? null : t
+      } catch { /* noop */ }
     }
 
     const description = ogDesc

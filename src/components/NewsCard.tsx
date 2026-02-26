@@ -207,11 +207,21 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     if (cached) thumbCache.set(item.id, { ...cached, thumbnail: null })
   }
 
-  const isGenericGoogleThumb = (src: string | null | undefined) =>
-    src?.includes('J6_coFbogx') ?? false
+  // 알려진 기본/플레이스홀더 이미지 URL 감지
+  const isGenericThumb = (src: string | null | undefined): boolean => {
+    if (!src) return false
+    return (
+      src.includes('J6_coFbogx') ||                    // Google News 기본
+      src.includes('og_image_default') ||               // Naver 기본 og:image
+      src.includes('/static.news/image/news/ogtag/') || // Naver ogtag (로고/기본)
+      src.includes('noimage') ||                        // 공통 no-image 패턴
+      src.includes('no_image') ||
+      src.includes('noimge')                            // 오타 변종
+    )
+  }
 
   const rawThumb = item.thumbnail ?? lazyThumb
-  const thumbnail = imgFailed || isGenericGoogleThumb(rawThumb) ? null : rawThumb
+  const thumbnail = imgFailed || isGenericThumb(rawThumb) ? null : rawThumb
   const bodyText = item.summary || lazyDesc
   const thumbGradient = CATEGORY_THUMB_BG[item.category] ?? CATEGORY_THUMB_BG['기타']
 

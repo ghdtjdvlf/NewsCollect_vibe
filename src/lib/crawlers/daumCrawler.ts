@@ -63,8 +63,10 @@ export async function fetchDaumSection(
 
       const srcset = $(el).find('picture source').first().attr('srcset') || ''
       const imgFromSrcset = extractDaumImg(srcset)
-      // picture>source가 없을 때 img 태그 fallback
-      let imgFromTag = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || ''
+      // picture>source가 없을 때 img 태그 fallback (data: 인라인 플레이스홀더 제외)
+      const ds = $(el).find('img').attr('data-src') ?? ''
+      const s  = $(el).find('img').attr('src') ?? ''
+      let imgFromTag = (!ds.startsWith('data:') && ds) || (!s.startsWith('data:') && s) || ''
       if (imgFromTag.startsWith('//')) imgFromTag = `https:${imgFromTag}`
       const imgSrc = imgFromSrcset || (imgFromTag.startsWith('http') ? imgFromTag : undefined)
 
