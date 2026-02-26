@@ -1,31 +1,52 @@
 import type { NewsItem } from '@/types/news'
 import type { CommunityPost } from './crawlers/communityCrawler'
-import { toMention } from './crawlers/communityCrawler'
+import { toMention, extractKeywords } from './crawlers/communityCrawler'
 
-// ─── 커뮤니티 키워드와 뉴스 제목 매칭 ───────────────────
+function keywordWeight(kw: string): number {
+  // 바이그램(띄어쓰기 포함)은 고가중치
+  if (kw.includes(' ')) return 5
+  if (kw.length >= 4) return 3
+  if (kw.length >= 3) return 2
+  return 1
+}
+
+// ─── 커뮤니티 키워드 ↔ 뉴스 제목 양방향 매칭 ──────────
 function matchScore(newsTitle: string, communityPosts: CommunityPost[]): {
   score: number
   matches: CommunityPost[]
 } {
-  const normalizedTitle = newsTitle
-    .replace(/[^\w가-힣\s]/g, ' ')
-    .toLowerCase()
+  const normalizedNews = newsTitle.replace(/[^\w가-힣\s]/g, ' ').toLowerCase()
+  // 뉴스 제목에서도 키워드 추출 (양방향)
+  const newsKeywords = extractKeywords(normalizedNews)
 
   let score = 0
   const matches: CommunityPost[] = []
 
   for (const post of communityPosts) {
     let postScore = 0
+    const normalizedPost = post.postTitle.replace(/[^\w가-힣\s]/g, ' ').toLowerCase()
 
-    for (const keyword of post.keywords) {
-      if (keyword.length >= 2 && normalizedTitle.includes(keyword.toLowerCase())) {
-        // 키워드 길이에 비례한 가중치
-        postScore += keyword.length >= 4 ? 3 : keyword.length >= 3 ? 2 : 1
+    // 방향 1: 커뮤니티 키워드 → 뉴스 제목에 포함되는지
+    for (const kw of post.keywords) {
+      if (kw.length >= 2 && normalizedNews.includes(kw.toLowerCase())) {
+        postScore += keywordWeight(kw)
       }
     }
 
+    // 방향 2: 뉴스 키워드 → 커뮤니티 글에 포함되는지
+    for (const kw of newsKeywords) {
+      if (kw.length >= 2 && normalizedPost.includes(kw.toLowerCase())) {
+        postScore += keywordWeight(kw)
+      }
+    }
+
+    // 양방향 모두 매칭 시 보너스
     if (postScore > 0) {
-      // 댓글/조회수 기반 가중치 추가
+      const bothDirections =
+        post.keywords.some((kw) => normalizedNews.includes(kw.toLowerCase())) &&
+        newsKeywords.some((kw) => normalizedPost.includes(kw.toLowerCase()))
+      if (bothDirections) postScore *= 1.5
+
       const engagementBonus = Math.log10(Math.max(post.commentCount + 1, 1)) * 0.5
       score += postScore + engagementBonus
       matches.push(post)
