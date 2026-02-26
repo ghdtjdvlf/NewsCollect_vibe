@@ -14,9 +14,9 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 type SummaryData = { lines: string[]; conclusion: string }
 
-// ─── 기사 메타 fetch (og:image, og:description) ──────────
-async function fetchArticleMeta(url: string): Promise<{ thumbnail: string | null; description: string | null }> {
-  const EMPTY = { thumbnail: null, description: null }
+// ─── 기사 메타 fetch (og:image, og:description, publishedAt) ──────────
+async function fetchArticleMeta(url: string): Promise<{ thumbnail: string | null; description: string | null; publishedAt: string | null }> {
+  const EMPTY = { thumbnail: null, description: null, publishedAt: null }
   try {
     let parsed = new URL(url)
     if (!['http:', 'https:'].includes(parsed.protocol)) return EMPTY
@@ -81,7 +81,25 @@ async function fetchArticleMeta(url: string): Promise<{ thumbnail: string | null
       ? ogDesc.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim()
       : null
 
-    return { thumbnail, description }
+    // ─── 발행 시각 추출 (기자 이름 옆 시간 기준) ──────────
+    const rawDate =
+      html.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']article:published_time["']/i)?.[1] ??
+      html.match(/<meta[^>]+name=["']pubdate["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+name=["']pubdate["']/i)?.[1] ??
+      html.match(/<meta[^>]+name=["']date["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<time[^>]+datetime=["']([^"']+)["']/i)?.[1] ??
+      null
+
+    let publishedAt: string | null = null
+    if (rawDate) {
+      try {
+        const d = new Date(rawDate)
+        if (!isNaN(d.getTime())) publishedAt = d.toISOString()
+      } catch { /* noop */ }
+    }
+
+    return { thumbnail, description, publishedAt }
   } catch {
     return EMPTY
   }
@@ -100,11 +118,12 @@ async function enrichWithMeta(items: NewsItem[]): Promise<NewsItem[]> {
     for (let j = 0; j < chunk.length; j++) {
       const { i: idx, item } = chunk[j]
       const settled = metas[j]
-      const meta = settled.status === 'fulfilled' ? settled.value : { thumbnail: null, description: null }
+      const meta = settled.status === 'fulfilled' ? settled.value : { thumbnail: null, description: null, publishedAt: null }
       results[idx] = {
         ...item,
         thumbnail: item.thumbnail ?? meta.thumbnail ?? undefined,
         summary: item.summary ?? meta.description ?? undefined,
+        publishedAt: meta.publishedAt ?? item.publishedAt,
       }
     }
   }
