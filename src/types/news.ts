@@ -37,6 +37,9 @@ export interface NewsItem {
   communityMentions?: CommunityMention[]
   // 검색 전용
   relevanceScore?: number
+  // AI 요약 (batch embed — 카드 확장 시 추가 Firestore read 불필요)
+  summaryLines?: string[]
+  conclusion?: string
 }
 
 // ─── 커뮤니티 언급 ───────────────────────────────────────

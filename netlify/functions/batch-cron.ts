@@ -1,5 +1,6 @@
-// Netlify Functions v2: config.schedule로 크론 정의 (@netlify/functions import 불필요)
-export default async function batchCron(): Promise<Response> {
+import type { Config } from '@netlify/functions'
+
+export default async function batchCron(req: Request): Promise<Response> {
   const siteUrl = process.env.URL ?? process.env.NEXT_PUBLIC_BASE_URL
   if (!siteUrl) {
     console.error('[batch-cron] URL 환경변수가 없습니다.')
@@ -23,6 +24,6 @@ export default async function batchCron(): Promise<Response> {
   }
 }
 
-export const config = {
+export const config: Config = {
   schedule: '*/5 * * * *',
 }
