@@ -6,6 +6,14 @@ import { Clock, MessageSquare, TrendingUp, ExternalLink, Eye, Loader2 } from 'lu
 import { cn } from '@/lib/cn'
 import type { NewsItem } from '@/types/news'
 
+// ── 모듈 레벨 직렬 큐: 동시 Gemini 호출 방지 ──────────────
+let _summarizeQueue: Promise<void> = Promise.resolve()
+function enqueue<T>(fn: () => Promise<T>): Promise<T> {
+  const p = _summarizeQueue.then(fn)
+  _summarizeQueue = p.then(() => {}, () => {})
+  return p
+}
+
 const cardTransition = { ease: 'easeIn', duration: 0.2 }
 
 interface NewsCardProps {
@@ -69,6 +77,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
   const [summaryConclusion, setSummaryConclusion] = useState<string | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryError, setSummaryError] = useState('')
+  const [retryTrigger, setRetryTrigger] = useState(0)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const summarizeCalledRef = useRef(false)
@@ -102,33 +111,48 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     if (summarizeCalledRef.current) return
     summarizeCalledRef.current = true
 
+    // 배치에서 미리 embed된 summaryLines가 있으면 API 호출 생략
+    if (item.summaryLines && item.summaryLines.length > 0) {
+      console.log(`${tag} 요약 캐시(embed) 사용 ✅ ${item.summaryLines.length}줄`)
+      setSummaryLines(item.summaryLines)
+      setSummaryConclusion(item.conclusion ?? null)
+      return
+    }
+
     setSummaryLoading(true)
     setSummaryError('')
 
     console.log(`${tag} 요약요청 →`, item.url.slice(0, 60))
-    fetch('/api/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: item.id, title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
-    })
-      .then((r) => r.json())
-      .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {
-        if (data.lines && data.lines.length > 0) {
-          console.log(`${tag} 요약성공 ✅ ${data.lines.length}줄`)
-          setSummaryLines(data.lines)
-          setSummaryConclusion(data.conclusion ?? null)
-        } else {
-          const err = data.error ?? '요약에 실패했습니다.'
-          console.warn(`${tag} 요약실패 ❌`, err)
-          setSummaryError(err)
-        }
+
+    enqueue(async () => {
+      const r = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: item.id, title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
       })
+      const data: { lines?: string[]; conclusion?: string; error?: string } = await r.json()
+
+      if (data.lines && data.lines.length > 0) {
+        console.log(`${tag} 요약성공 ✅ ${data.lines.length}줄`)
+        setSummaryLines(data.lines)
+        setSummaryConclusion(data.conclusion ?? null)
+      } else if (r.status === 429) {
+        console.warn(`${tag} 429 → 3초 후 자동 재시도`)
+        setSummaryError('잠시 후 자동으로 재시도합니다...')
+        summarizeCalledRef.current = false
+        setTimeout(() => setRetryTrigger((t) => t + 1), 3000)
+      } else {
+        const err = data.error ?? '요약에 실패했습니다.'
+        console.warn(`${tag} 요약실패 ❌`, err)
+        setSummaryError(err)
+      }
+    })
       .catch((e) => {
         console.error(`${tag} 요약네트워크오류 ❌`, e)
         setSummaryError('네트워크 오류가 발생했습니다.')
       })
       .finally(() => setSummaryLoading(false))
-  }, [isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isExpanded, retryTrigger]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 열린 카드가 뷰포트에서 완전히 사라지면 자동 닫힘
   useEffect(() => {

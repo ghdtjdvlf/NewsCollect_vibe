@@ -288,11 +288,18 @@ export async function POST(req: NextRequest) {
     const uniqueItems = Array.from(
       new Map(allItems.map((item) => [item.id, item])).values()
     )
+
+    if (uniqueItems.length === 0) {
+      console.warn('[batch] 수집된 기사 없음 — 크롤러 전체 실패')
+      return NextResponse.json({ message: '수집된 기사 없음 (크롤러 실패)', total: 0, newItems: 0, saved: 0, embedded: 0, deleted: 0, errors: [] })
+    }
     const itemsById = new Map(uniqueItems.map((item) => [item.id, item]))
 
     const summaryCol = db.collection('summaries')
     const docRefs = uniqueItems.map((item) => summaryCol.doc(item.id))
-    const existingDocs = await db.getAll(...docRefs).catch(() => [])
+    const existingDocs = docRefs.length > 0
+      ? await db.getAll(...docRefs).catch(() => [])
+      : []
 
     // 기존 summaries 데이터 추출
     const existingSummaryMap = new Map<string, SummaryData>()

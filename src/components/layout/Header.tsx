@@ -1,10 +1,22 @@
 'use client'
 
 import { motion, useScroll, useTransform } from 'framer-motion'
-import { RefreshCw, Zap } from 'lucide-react'
-import { useState } from 'react'
+import { RefreshCw, Zap, Timer } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/lib/cn'
+
+function getSecondsUntilNextBatch(): number {
+  const now = new Date()
+  const elapsed = (now.getMinutes() % 5) * 60 + now.getSeconds()
+  return 300 - elapsed
+}
+
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
 
 export function Header() {
   const { scrollY } = useScroll()
@@ -15,6 +27,12 @@ export function Header() {
   const { autoRefresh, setAutoRefresh } = useUIStore()
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchMsg, setBatchMsg] = useState('')
+  const [countdown, setCountdown] = useState(getSecondsUntilNextBatch)
+
+  useEffect(() => {
+    const id = setInterval(() => setCountdown(getSecondsUntilNextBatch()), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   async function handleBatch() {
     setBatchLoading(true)
@@ -47,6 +65,20 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* 다음 배치까지 카운트다운 */}
+          <div
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 rounded-full text-xs font-mono font-medium tabular-nums',
+              countdown <= 30
+                ? 'bg-amber-50 text-amber-500'
+                : 'bg-gray-100 text-gray-400'
+            )}
+            title="다음 뉴스 갱신까지 남은 시간"
+          >
+            <Timer className="w-3 h-3 shrink-0" />
+            <span>{formatCountdown(countdown)}</span>
+          </div>
+
           {/* 배치 수동 실행 버튼 */}
           <button
             onClick={handleBatch}

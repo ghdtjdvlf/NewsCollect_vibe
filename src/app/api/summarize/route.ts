@@ -61,7 +61,12 @@ export async function POST(req: NextRequest) {
 
     \n\n${content}${url ? `\n출처: ${url}` : ''}`
 
-    const result = await model.generateContent(prompt)
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 8000)
+      ),
+    ])
     const text = result.response.text()
 
     const allLines = text
@@ -95,6 +100,9 @@ export async function POST(req: NextRequest) {
     const message = err instanceof Error ? err.message : '알 수 없는 오류'
     if (message.includes('429') || message.toLowerCase().includes('too many requests') || message.includes('quota')) {
       return NextResponse.json({ error: '요청이 많습니다! 잠시 후 이용해주세요.' }, { status: 429 })
+    }
+    if (message === 'TIMEOUT') {
+      return NextResponse.json({ error: 'AI 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해주세요.' }, { status: 504 })
     }
     return NextResponse.json({ error: `요약 실패: ${message}` }, { status: 500 })
   }
