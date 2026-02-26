@@ -1,0 +1,142 @@
+import { load } from 'cheerio'
+import { fetchWithRetry } from '../fetcher'
+import { logCrawl } from '../crawlLogger'
+import type { NewsItem, NewsCategory } from '../../types/news'
+import { stableId, toIso, guessCategory } from './utils'
+
+const DAUM_SECTION: Partial<Record<NewsCategory, string>> = {
+  경제: 'economy',
+  사회: 'society',
+  정치: 'politics',
+  연예: 'entertain',
+  스포츠: 'sports',
+  세계: 'foreign',
+}
+
+const BASE_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept-Language': 'ko-KR,ko;q=0.9',
+  Referer: 'https://news.daum.net/',
+}
+
+function extractDaumImg(srcset: string): string | undefined {
+  if (!srcset) return undefined
+  const fnameMatch = srcset.match(/fname=(https?[^&\s]+)/)
+  if (fnameMatch) {
+    try {
+      return decodeURIComponent(fnameMatch[1])
+    } catch {
+      return fnameMatch[1]
+    }
+  }
+  const first = srcset.split(',')[0].trim().split(' ')[0]
+  return first.startsWith('//') ? `https:${first}` : first || undefined
+}
+
+export async function fetchDaumSection(
+  category: NewsCategory,
+  limit = 15
+): Promise<NewsItem[]> {
+  const start = Date.now()
+  const path = DAUM_SECTION[category] ?? 'society'
+  const url = `https://news.daum.net/${path}`
+
+  try {
+    const html = await fetchWithRetry(url, { timeout: 10000, headers: BASE_HEADERS })
+    const $ = load(html)
+    const items: NewsItem[] = []
+
+    $('a.item_newsheadline2, .list_news2 .item_issue2 a, .list_news .item_issue a').each((_, el) => {
+      if (items.length >= limit) return false
+
+      const title = $(el).find('.tit_txt, strong').text().trim()
+      const link = $(el).attr('href') || $(el).find('a').first().attr('href') || ''
+
+      if (!title || !link || title.length < 4) return
+
+      const srcset = $(el).find('picture source').first().attr('srcset') || ''
+      const imgFromSrcset = extractDaumImg(srcset)
+      const ds = $(el).find('img').attr('data-src') ?? ''
+      const s  = $(el).find('img').attr('src') ?? ''
+      let imgFromTag = (!ds.startsWith('data:') && ds) || (!s.startsWith('data:') && s) || ''
+      if (imgFromTag.startsWith('//')) imgFromTag = `https:${imgFromTag}`
+      const imgSrc = imgFromSrcset || (imgFromTag.startsWith('http') ? imgFromTag : undefined)
+
+      const fullUrl = link.startsWith('http') ? link : `https://news.daum.net${link}`
+
+      const dateText = $(el).find('.info_view, .txt_time').text().trim()
+      const summary = $(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text().trim() || undefined
+
+      items.push({
+        id: stableId(fullUrl, 'd'),
+        title,
+        summary,
+        url: fullUrl,
+        source: 'daum',
+        sourceName: $(el).find('.info_cp, .txt_cp').text().trim() || '다음뉴스',
+        category: guessCategory(title) ?? category,
+        publishedAt: dateText ? toIso(dateText) : new Date().toISOString(),
+        collectedAt: new Date().toISOString(),
+        thumbnail: imgSrc,
+      })
+    })
+
+    logCrawl({
+      source: 'daum',
+      method: 'firecrawl',
+      collected: items.length,
+      deduplicated: items.length,
+      filtered: 0,
+      failed: 0,
+      duration_ms: Date.now() - start,
+    })
+
+    return items
+  } catch (err) {
+    logCrawl({
+      source: 'daum',
+      method: 'firecrawl',
+      collected: 0,
+      deduplicated: 0,
+      filtered: 0,
+      failed: 1,
+      duration_ms: Date.now() - start,
+    })
+    console.error(`[Daum:${category}] 크롤링 실패:`, err)
+    return []
+  }
+}
+
+export async function fetchDaumRss(
+  categories: NewsCategory[] = ['경제', '사회', '정치'],
+  limitPerCategory = 10
+): Promise<NewsItem[]> {
+  const results = await Promise.allSettled(
+    categories.map((cat) => fetchDaumSection(cat, limitPerCategory))
+  )
+  return results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+}
+
+export async function fetchDaumHotIssues(): Promise<string[]> {
+  try {
+    const html = await fetchWithRetry('https://news.daum.net/', {
+      timeout: 8000,
+      headers: BASE_HEADERS,
+    })
+    const $ = load(html)
+    const keywords: string[] = []
+
+    $('a.link_issue, .issue_list a, .realtime_issue a, .hot_issue a').each((_, el) => {
+      const text = $(el).text().trim()
+      if (text && text.length > 1 && text.length < 20) keywords.push(text)
+    })
+
+    return [...new Set(keywords)].slice(0, 20)
+  } catch (err) {
+    console.error('[Daum] 이슈 키워드 실패:', err)
+    return []
+  }
+}
+
+export { guessCategory }
