@@ -5,7 +5,7 @@ import type { NewsCategory, NewsItem } from '@/types/news'
 
 export const dynamic = 'force-dynamic'
 
-const CACHE_TTL = 10 * 60 * 1000 // 10분
+const CACHE_TTL = 5 * 60 * 1000 // 5분 (batch 주기와 동기화)
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
     if (doc.exists) {
       const data = doc.data()!
       const age = Date.now() - new Date(data.updatedAt).getTime()
+      console.log(`[API/latest] Firebase 캐시 나이: ${Math.round(age / 1000)}초, updatedAt: ${data.updatedAt}`)
       if (age < CACHE_TTL) {
         let items: NewsItem[] = data.items ?? []
         if (category) items = items.filter((item: NewsItem) => item.category === category)
@@ -30,6 +31,9 @@ export async function GET(request: NextRequest) {
           { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30' } }
         )
       }
+      console.log('[API/latest] Firebase 캐시 만료 → 직접 크롤링')
+    } else {
+      console.log('[API/latest] Firebase 캐시 없음 → 직접 크롤링')
     }
   } catch (err) {
     console.error('[API/latest] Firebase 조회 실패, 직접 크롤링으로 폴백:', err)
