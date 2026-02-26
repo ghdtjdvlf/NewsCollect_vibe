@@ -54,6 +54,9 @@ export async function fetchNaverSection(
         $(el).find('img').attr('data-src') ||
         $(el).find('img').attr('src')
 
+      // 프로토콜 상대 URL(//...) → https 보완
+      if (imgSrc?.startsWith('//')) imgSrc = `https:${imgSrc}`
+
       // pstatic.net 이미지는 원본 크기로 변환
       if (imgSrc?.includes('pstatic.net') && imgSrc.includes('?type=')) {
         imgSrc = imgSrc.replace(/\?type=.*$/, '?type=w647')
@@ -132,7 +135,8 @@ export async function fetchNaverRanking(limit = 20): Promise<NewsItem[]> {
       const anchor = $(el).find('a').first()
       const title = anchor.text().trim()
       const href = anchor.attr('href') ?? ''
-      const imgSrc = $(el).find('img').attr('data-src') || $(el).find('img').attr('src')
+      let imgSrc = $(el).find('img').attr('data-src') || $(el).find('img').attr('src')
+      if (imgSrc?.startsWith('//')) imgSrc = `https:${imgSrc}`
       const url = href.startsWith('http') ? href : `https://news.naver.com${href}`
 
       if (title && href) {

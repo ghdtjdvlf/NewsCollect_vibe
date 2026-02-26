@@ -73,6 +73,19 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
   const wrapRef = useRef<HTMLDivElement>(null)
   const summarizeCalledRef = useRef(false)
 
+  // 로그 헬퍼: [Card:출처/id끝4자리] 형식
+  const tag = `[Card:${item.sourceName}/${item.id.slice(-4)}]`
+
+  // 마운트 시 초기 상태 로그
+  useEffect(() => {
+    console.log(`${tag} 초기상태`, {
+      이미지: item.thumbnail ? `✅ ${item.thumbnail.slice(0, 60)}...` : '❌ 없음',
+      본문: item.summary ? `✅ ${item.summary.slice(0, 40)}...` : '❌ 없음',
+      링크: item.url ? `✅ ${item.url.slice(0, 60)}` : '❌ 없음',
+      제목: item.title.slice(0, 30),
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const collapse = useCallback(() => {
     if (onExpand) onExpand(null)
     else setInternalExpanded(false)
@@ -92,6 +105,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     setSummaryLoading(true)
     setSummaryError('')
 
+    console.log(`${tag} 요약요청 →`, item.url.slice(0, 60))
     fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,13 +114,19 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
       .then((r) => r.json())
       .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {
         if (data.lines && data.lines.length > 0) {
+          console.log(`${tag} 요약성공 ✅ ${data.lines.length}줄`)
           setSummaryLines(data.lines)
           setSummaryConclusion(data.conclusion ?? null)
         } else {
-          setSummaryError(data.error ?? '요약에 실패했습니다.')
+          const err = data.error ?? '요약에 실패했습니다.'
+          console.warn(`${tag} 요약실패 ❌`, err)
+          setSummaryError(err)
         }
       })
-      .catch(() => setSummaryError('네트워크 오류가 발생했습니다.'))
+      .catch((e) => {
+        console.error(`${tag} 요약네트워크오류 ❌`, e)
+        setSummaryError('네트워크 오류가 발생했습니다.')
+      })
       .finally(() => setSummaryLoading(false))
   }, [isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -143,10 +163,15 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
         observer.disconnect()
         setThumbLoading(true)
 
+        console.log(`${tag} 썸네일fetch →`, item.url.slice(0, 60))
         fetch(`/api/thumbnail?url=${encodeURIComponent(item.url)}`)
           .then((r) => r.json())
           .then((data: { thumbnail: string | null; description: string | null }) => {
             const result = { thumbnail: data.thumbnail ?? null, description: data.description ?? null }
+            console.log(`${tag} 썸네일fetch결과`, {
+              이미지: result.thumbnail ? `✅ ${result.thumbnail.slice(0, 60)}` : '❌ 없음',
+              본문: result.description ? `✅ ${result.description.slice(0, 40)}...` : '❌ 없음',
+            })
             if (thumbCache.size >= 300) {
               const firstKey = thumbCache.keys().next().value
               if (firstKey) thumbCache.delete(firstKey)
@@ -155,7 +180,10 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
             setLazyThumb(result.thumbnail)
             setLazyDesc(result.description)
           })
-          .catch(() => thumbCache.set(item.id, { thumbnail: null, description: null }))
+          .catch((e) => {
+            console.error(`${tag} 썸네일fetch실패 ❌`, e)
+            thumbCache.set(item.id, { thumbnail: null, description: null })
+          })
           .finally(() => setThumbLoading(false))
       },
       { threshold: 0.1 }
@@ -164,8 +192,16 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     return () => observer.disconnect()
   }, [item.id, item.url, item.thumbnail, item.summary])
 
+  // 이미지 로드 성공
+  function handleImgLoad(e: React.SyntheticEvent<HTMLImageElement>) {
+    const src = (e.target as HTMLImageElement).src
+    console.log(`${tag} 이미지로드 ✅`, src.slice(0, 80))
+  }
+
   // 이미지 로드 실패 → gradient fallback + 캐시 무효화
-  function handleImgError() {
+  function handleImgError(e: React.SyntheticEvent<HTMLImageElement>) {
+    const src = (e.target as HTMLImageElement).src
+    console.warn(`${tag} 이미지로드실패 ❌ proxy:`, src.slice(0, 80))
     setImgFailed(true)
     const cached = thumbCache.get(item.id)
     if (cached) thumbCache.set(item.id, { ...cached, thumbnail: null })
@@ -198,11 +234,11 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={thumbnail}
+              src={`/api/image-proxy?url=${encodeURIComponent(thumbnail)}`}
               alt={item.title}
               className="absolute inset-0 w-full h-full object-cover"
               loading="lazy"
-              referrerPolicy="no-referrer"
+              onLoad={handleImgLoad}
               onError={handleImgError}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />

@@ -119,8 +119,8 @@ export async function getLatestNews(
   // 최대 12초 내에 수집 — Naver/Daum HTML 크롤링 우선 (이미지 포함)
   const raw = await withTimeout(
     Promise.allSettled([
-      Promise.all(targetCategories.map((cat) => fetchNaverSection(cat, 8))).then((r) => r.flat()),
-      fetchDaumRss(targetCategories, 8),
+      Promise.all(targetCategories.map((cat) => fetchNaverSection(cat, 20))).then((r) => r.flat()),
+      fetchDaumRss(targetCategories, 20),
       Promise.all(targetCategories.map((cat) => fetchGoogleNewsByCategory(cat, 5))).then((r) => r.flat()),
     ]).then((results) =>
       results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))

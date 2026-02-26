@@ -5,9 +5,100 @@ import { getTrendingNews, getLatestNews } from '@/lib/newsAggregator'
 import type { NewsItem } from '@/types/news'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 60
+export const maxDuration = 300
 
-const BATCH_SIZE = 20 // 한 번에 요약할 기사 수
+const BATCH_SIZE = 300 // 출력 65,536 토큰의 70% ÷ 기사당 ~150토큰
+const META_CONCURRENCY = 10 // 썸네일/description 동시 fetch 수
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+async function fetchArticleMeta(url: string): Promise<{ thumbnail: string | null; description: string | null }> {
+  const EMPTY = { thumbnail: null, description: null }
+  try {
+    let parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) return EMPTY
+
+    if (parsed.hostname === 'news.google.com') {
+      const redirectRes = await fetch(parsed.toString(), {
+        headers: { 'User-Agent': UA, 'Accept-Language': 'ko-KR,ko;q=0.9' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(5000),
+      })
+      if (!redirectRes.ok) return EMPTY
+      const finalUrl = new URL(redirectRes.url)
+      if (finalUrl.hostname.includes('google.com')) return EMPTY
+      parsed = finalUrl
+    }
+
+    const res = await fetch(parsed.toString(), {
+      headers: { 'User-Agent': UA, Accept: 'text/html', 'Accept-Language': 'ko-KR,ko;q=0.9' },
+      signal: AbortSignal.timeout(5000),
+      redirect: 'follow',
+    })
+    if (!res.ok) return EMPTY
+    if (!(res.headers.get('content-type') ?? '').includes('html')) return EMPTY
+
+    const reader = res.body?.getReader()
+    if (!reader) return EMPTY
+
+    let html = ''
+    while (html.length < 30000) {
+      const { done, value } = await reader.read()
+      if (done) break
+      html += new TextDecoder().decode(value)
+      if (html.includes('</head>')) break
+    }
+    reader.cancel()
+
+    const ogImage =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)?.[1] ??
+      null
+
+    const ogDesc =
+      html.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:description["']/i)?.[1] ??
+      html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ??
+      null
+
+    let thumbnail: string | null = null
+    if (ogImage) {
+      try { thumbnail = new URL(ogImage, parsed.origin).toString() } catch { /* noop */ }
+    }
+
+    const description = ogDesc
+      ? ogDesc.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim()
+      : null
+
+    return { thumbnail, description }
+  } catch {
+    return EMPTY
+  }
+}
+
+async function enrichWithMeta(items: NewsItem[]): Promise<NewsItem[]> {
+  const results = [...items]
+  const targets = items
+    .map((item, i) => ({ item, i }))
+    .filter(({ item }) => !item.thumbnail || !item.summary)
+
+  for (let i = 0; i < targets.length; i += META_CONCURRENCY) {
+    const chunk = targets.slice(i, i + META_CONCURRENCY)
+    const metas = await Promise.allSettled(chunk.map(({ item }) => fetchArticleMeta(item.url)))
+    for (let j = 0; j < chunk.length; j++) {
+      const { i: idx, item } = chunk[j]
+      const settled = metas[j]
+      const meta = settled.status === 'fulfilled' ? settled.value : { thumbnail: null, description: null }
+      results[idx] = {
+        ...item,
+        thumbnail: item.thumbnail ?? meta.thumbnail ?? undefined,
+        summary: item.summary ?? meta.description ?? undefined,
+      }
+    }
+  }
+
+  return results
+}
 
 // 20건씩 묶어서 Gemini에 한 번에 요약 요청
 async function summarizeBatch(
@@ -26,13 +117,13 @@ ${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${item.summa
 줄1
 줄2
 줄3
-결론: 비유내용
+결론: 
 
 [2]
 줄1
 줄2
 줄3
-결론: 비유내용`
+결론: `
 
   const result = await model.generateContent(prompt)
   const text = result.response.text()
@@ -82,12 +173,34 @@ export async function POST(req: NextRequest) {
     // 1. 뉴스 수집
     const [trendingData, latestData] = await Promise.all([
       getTrendingNews(),
-      getLatestNews(undefined, 1, 50),
+      getLatestNews(undefined, 1, 200),
     ])
 
+    // 썸네일 + description 사전 수집 (lazy fetch 없애기)
+    const [enrichedTrending, enrichedLatest] = await Promise.all([
+      enrichWithMeta(trendingData.items),
+      enrichWithMeta(latestData.items),
+    ])
+
+    // 뉴스 목록 전체를 Firebase에 저장 (프론트가 여기서 읽어감)
+    try {
+      await Promise.all([
+        db.collection('news_cache').doc('trending').set({
+          items: enrichedTrending,
+          updatedAt: new Date().toISOString(),
+        }),
+        db.collection('news_cache').doc('latest').set({
+          items: enrichedLatest,
+          updatedAt: new Date().toISOString(),
+        }),
+      ])
+    } catch (cacheErr) {
+      console.error('[batch] news_cache 저장 실패:', cacheErr)
+    }
+
     const allItems = [
-      ...trendingData.items,
-      ...latestData.items,
+      ...enrichedTrending,
+      ...enrichedLatest,
     ]
 
     // 중복 제거 (id 기준)
@@ -103,7 +216,7 @@ export async function POST(req: NextRequest) {
     const newItems = uniqueItems.filter((item) => !existingIds.has(item.id))
 
     if (newItems.length === 0) {
-      return NextResponse.json({ message: '새 기사 없음', skipped: uniqueItems.length })
+      return NextResponse.json({ message: '새 기사 없음 (뉴스 캐시는 갱신됨)', skipped: uniqueItems.length })
     }
 
     // 3. BATCH_SIZE씩 나눠서 Gemini 요약

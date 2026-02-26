@@ -34,7 +34,7 @@ export function TabBar({ active, onChange }: TabBarProps) {
               <span className="text-[10px] font-medium">{tab.label}</span>
 
               {active === tab.id && (
-                <motion.div
+                <motion.span
                   layoutId="tab-indicator"
                   className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-indigo-500 rounded-full"
                   transition={{ type: 'spring', bounce: 0.3, duration: 0.5 }}

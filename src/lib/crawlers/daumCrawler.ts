@@ -62,7 +62,11 @@ export async function fetchDaumSection(
       if (!title || !link || title.length < 4) return
 
       const srcset = $(el).find('picture source').first().attr('srcset') || ''
-      const imgSrc = extractDaumImg(srcset)
+      const imgFromSrcset = extractDaumImg(srcset)
+      // picture>source가 없을 때 img 태그 fallback
+      let imgFromTag = $(el).find('img').attr('data-src') || $(el).find('img').attr('src') || ''
+      if (imgFromTag.startsWith('//')) imgFromTag = `https:${imgFromTag}`
+      const imgSrc = imgFromSrcset || (imgFromTag.startsWith('http') ? imgFromTag : undefined)
 
       // v.daum.net URL은 그대로 사용 (리다이렉트 없음)
       const fullUrl = link.startsWith('http') ? link : `https://news.daum.net${link}`
