@@ -67,7 +67,7 @@ export async function getTrendingNews(): Promise<TrendingResponse> {
   const cached = getCache<TrendingResponse>(cacheKey)
   if (cached) return cached
 
-  // 뉴스 수집 (최대 12초) — Naver/Daum HTML 크롤링 우선 (이미지 포함)
+  // 뉴스 수집 (최대 8초, Netlify 10초 한계 고려) — Naver/Daum HTML 크롤링 우선 (이미지 포함)
   const rawNews = await withTimeout(
     Promise.allSettled([
       fetchNaverRss(15),                          // Naver 섹션 HTML (이미지 O)
@@ -76,12 +76,12 @@ export async function getTrendingNews(): Promise<TrendingResponse> {
     ]).then((results) =>
       results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     ),
-    12000,
+    8000,
     [] as NewsItem[]
   )
 
-  // 커뮤니티 수집 (최대 8초, 실패 허용)
-  const communityPosts = await withTimeout(fetchAllCommunities(), 8000, [])
+  // 커뮤니티 수집 (최대 5초, 실패 허용)
+  const communityPosts = await withTimeout(fetchAllCommunities(), 5000, [])
 
   const deduplicated = processNewsItems(rawNews)
   const trending = filterTrendingNews(deduplicated, communityPosts, 0, 20)
@@ -116,7 +116,7 @@ export async function getLatestNews(
     ? (CRAWL_FALLBACK[category] ?? [category])
     : ['경제', '사회', '사건사고', '정치', 'IT/과학']
 
-  // 최대 12초 내에 수집 — Naver/Daum HTML 크롤링 우선 (이미지 포함)
+  // 최대 8초 내에 수집 (Netlify 10초 한계 고려) — Naver/Daum HTML 크롤링 우선 (이미지 포함)
   const raw = await withTimeout(
     Promise.allSettled([
       Promise.all(targetCategories.map((cat) => fetchNaverSection(cat, 20))).then((r) => r.flat()),
@@ -125,7 +125,7 @@ export async function getLatestNews(
     ]).then((results) =>
       results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
     ),
-    12000,
+    8000,
     [] as NewsItem[]
   )
 

@@ -3,6 +3,7 @@ import { getTrendingNews } from '@/lib/newsAggregator'
 import { db } from '@/lib/firebase'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 25 // Netlify 함수 타임아웃 (초)
 
 const CACHE_TTL = 5 * 60 * 1000 // 5분 (batch 주기와 동기화)
 

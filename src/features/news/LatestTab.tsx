@@ -13,7 +13,7 @@ interface LatestTabProps {
 }
 
 export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps) {
-  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useLatestNews({ category: selectedCategory })
 
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -89,6 +89,18 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
             </div>
           </div>
         ))
+      ) : isError ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-gray-400">
+          <span className="text-2xl">⚠️</span>
+          <p className="text-sm">뉴스를 불러오지 못했습니다.</p>
+          <p className="text-xs">잠시 후 다시 시도해주세요.</p>
+        </div>
+      ) : allItems.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-gray-400">
+          <span className="text-2xl">📭</span>
+          <p className="text-sm">불러올 뉴스가 없습니다.</p>
+          <p className="text-xs">헤더의 ⚡ 배치실행을 눌러 뉴스를 수집해주세요.</p>
+        </div>
       ) : (
         <div className="space-y-3">
           {allItems.map((item) => (
