@@ -102,11 +102,15 @@ export async function GET(req: NextRequest) {
 
     const buffer = await res.arrayBuffer()
     if (buffer.byteLength > MAX_SIZE) return new NextResponse(null, { status: 413 })
+    // 3KB 미만 이미지는 플레이스홀더로 간주 (pstatic.net 기본 이미지 등)
+    if (buffer.byteLength < 3 * 1024) return new NextResponse(null, { status: 404 })
 
     return new NextResponse(buffer, {
       headers: {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600',
+        // private: Netlify CDN 캐싱 방지 (쿼리 파라미터 무시 캐싱 버그 예방)
+        // 브라우저는 max-age 동안 캐싱
+        'Cache-Control': 'private, max-age=3600',
         'Content-Length': String(buffer.byteLength),
       },
     })
