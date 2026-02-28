@@ -19,3 +19,4 @@ function initFirebase() {
 initFirebase()
 
 export const db = getFirestore()
+db.settings({ ignoreUndefinedProperties: true })
