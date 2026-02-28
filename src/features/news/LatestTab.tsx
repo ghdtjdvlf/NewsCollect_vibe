@@ -21,7 +21,10 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   // Fix: p.items 가 undefined 일 때 flatMap 오류 방지
-  const allItems = data?.pages.flatMap((p) => p.items ?? []) ?? []
+  const allItems = useMemo(
+    () => data?.pages.flatMap((p) => p.items ?? []) ?? [],
+    [data]
+  )
 
   // 로드된 아이템에서 카테고리 동적 수집 (Fix: 카테고리 태그 동기화)
   const displayCategories = useMemo(() => {
