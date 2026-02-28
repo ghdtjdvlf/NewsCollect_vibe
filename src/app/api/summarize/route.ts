@@ -4,10 +4,18 @@ import { db } from '@/lib/firebase'
 
 export const dynamic = 'force-dynamic'
 
+const GEMINI_MODEL = 'gemini-2.0-flash'
+
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GOOGLE_API_KEY
 
+  console.log('[summarize] 요청 수신', {
+    hasApiKey: !!apiKey,
+    apiKeyPrefix: apiKey?.slice(0, 8),
+  })
+
   if (!apiKey || apiKey === 'your_google_api_key_here') {
+    console.error('[summarize] GOOGLE_API_KEY 없음')
     return NextResponse.json(
       { error: 'GOOGLE_API_KEY가 .env.local에 설정되지 않았습니다.' },
       { status: 503 }
@@ -22,6 +30,8 @@ export async function POST(req: NextRequest) {
       url?: string
     }
 
+    console.log('[summarize] 파라미터', { id, titleLen: title?.length, hasSummary: !!summary, hasUrl: !!url })
+
     if (!title) {
       return NextResponse.json({ error: '제목이 필요합니다.' }, { status: 400 })
     }
@@ -29,16 +39,20 @@ export async function POST(req: NextRequest) {
     // 1. Firestore 캐시 먼저 확인
     if (id) {
       try {
+        console.log(`[summarize] Firestore 조회 시작 id=${id}`)
         const cached = await db.collection('summaries').doc(id).get()
-        console.log(`[summarize] Firestore lookup id=${id} exists=${cached.exists}`)
+        console.log(`[summarize] Firestore 조회 완료 id=${id} exists=${cached.exists}`)
+
         if (cached.exists) {
           const data = cached.data()!
+          console.log(`[summarize] 캐시 HIT → lines=${data.lines?.length}개`)
           return NextResponse.json({
             lines: data.lines,
             conclusion: data.conclusion,
             cached: true,
           })
         }
+        console.log(`[summarize] 캐시 MISS → Gemini 실시간 생성`)
       } catch (fbErr) {
         console.error('[summarize] Firestore 조회 실패:', fbErr)
       }
@@ -47,8 +61,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. 캐시 없으면 Gemini 실시간 생성
+    console.log(`[summarize] Gemini 호출 시작 model=${GEMINI_MODEL}`)
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
+    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
 
     const content = [title, summary].filter(Boolean).join('\n\n')
     const prompt = `
@@ -61,13 +76,17 @@ export async function POST(req: NextRequest) {
 
     \n\n${content}${url ? `\n출처: ${url}` : ''}`
 
+    const startTime = Date.now()
     const result = await Promise.race([
       model.generateContent(prompt),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('TIMEOUT')), 8000)
       ),
     ])
+    const elapsed = Date.now() - startTime
     const text = result.response.text()
+    console.log(`[summarize] Gemini 응답 완료 elapsed=${elapsed}ms textLen=${text.length}`)
+    console.log(`[summarize] Gemini 응답 텍스트 (앞 200자): ${text.slice(0, 200)}`)
 
     const allLines = text
       .split('\n')
@@ -83,21 +102,28 @@ export async function POST(req: NextRequest) {
       .filter((l) => !l.startsWith('결론'))
       .slice(0, 3)
 
+    console.log(`[summarize] 파싱 완료 lines=${lines.length} hasConclusion=${!!conclusion}`)
+
     // 3. Firestore에 저장 (다음 요청부터 캐시 사용)
     if (id && lines.length > 0) {
-      await db.collection('summaries').doc(id).set({
+      db.collection('summaries').doc(id).set({
         lines,
         conclusion: conclusion ?? '',
         title,
         generatedAt: new Date(),
         source: '',
-      }).catch(() => {}) // 저장 실패해도 응답은 정상 반환
+      }).then(() => {
+        console.log(`[summarize] Firestore 저장 완료 id=${id}`)
+      }).catch((saveErr) => {
+        console.error(`[summarize] Firestore 저장 실패 id=${id}:`, saveErr)
+      })
     }
 
     return NextResponse.json({ lines, conclusion, cached: false })
   } catch (err) {
-    console.error('[API/summarize]', err)
     const message = err instanceof Error ? err.message : '알 수 없는 오류'
+    console.error('[summarize] 오류 발생:', { message, stack: err instanceof Error ? err.stack?.slice(0, 300) : undefined })
+
     if (message.includes('429') || message.toLowerCase().includes('too many requests') || message.includes('quota')) {
       return NextResponse.json({ error: '요청이 많습니다! 잠시 후 이용해주세요.' }, { status: 429 })
     }
