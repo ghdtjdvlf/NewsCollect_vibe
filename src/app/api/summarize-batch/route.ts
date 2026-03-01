@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 25
 
 const MAX_PER_RUN = 10 // 한 번에 요약할 최대 기사 수 (10초 제한 내)
-const GEMINI_MODEL = 'gemini-2.0-flash-lite'
+const GEMINI_MODEL = 'gemini-1.5-flash'
 
 type SummaryData = { lines: string[]; conclusion: string }
 
