@@ -4,9 +4,9 @@ import { db } from '@/lib/firebase'
 import type { NewsItem } from '@/types/news'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 25
+export const maxDuration = 60
 
-const MAX_PER_RUN = 10 // 한 번에 요약할 최대 기사 수 (10초 제한 내)
+const MAX_PER_RUN = 200 // 미요약 기사 전체 처리 (gemini-1.5-flash 컨텍스트 1M 토큰)
 const GEMINI_MODEL = 'gemini-1.5-flash'
 
 type SummaryData = { lines: string[]; conclusion: string }
