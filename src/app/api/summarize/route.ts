@@ -4,7 +4,7 @@ import { db } from '@/lib/firebase'
 
 export const dynamic = 'force-dynamic'
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+const GEMINI_MODEL = 'gemini-2.5-flash-lite-preview-06-17'
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GOOGLE_API_KEY
