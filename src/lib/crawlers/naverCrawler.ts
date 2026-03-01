@@ -71,9 +71,18 @@ export async function fetchNaverSection(
       }
 
       const press = $(el).find('.sa_text_press').text().trim() || '네이버뉴스'
-      const dateText = $(el).find('.sa_text_datetime_bullet').text().trim()
-      // 기사 본문 미리보기 (이미지와 함께 수집)
+
+      // 날짜: 여러 셀렉터 순서대로 시도 (datetime 속성 → 텍스트 순)
+      const dateText =
+        $(el).find('[data-published-time]').attr('data-published-time') ||
+        $(el).find('[datetime]').attr('datetime') ||
+        $(el).find('.sa_text_datetime_bullet, .sa_date, .date, .info_date, .article_date, time').first().text().trim() ||
+        ''
+
       const summary = cleanSummary($(el).find('.sa_text_lede, .sa_desc, .lede').text())
+
+      const publishedAt = toIso(dateText || undefined)
+      if (items.length === 0) console.log(`[Naver:${category}] dateText 샘플="${dateText}" → ${publishedAt}`)
 
       items.push({
         id: stableId(link, 'n'),
@@ -83,7 +92,7 @@ export async function fetchNaverSection(
         source: 'naver',
         sourceName: press,
         category: guessCategory(title) ?? category,
-        publishedAt: dateText ? toIso(dateText) : new Date().toISOString(),
+        publishedAt,
         collectedAt: new Date().toISOString(),
         thumbnail: imgSrc?.startsWith('http') ? imgSrc : undefined,
       })

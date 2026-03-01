@@ -15,7 +15,7 @@ export function TrendingTab() {
   const { data, isLoading, error, refetch } = useTrendingNews()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<NewsCategory | '전체'>('전체')
-  const [sort, setSort] = useState<SortType>('trending')
+  const [sort, setSort] = useState<SortType>('latest')
 
   // 로드된 아이템에서 카테고리 동적 수집
   const displayCategories = useMemo(() => {
@@ -98,15 +98,6 @@ export function TrendingTab() {
             onPointerDown={(e) => e.stopPropagation()}
           >
             <button
-              onClick={() => setSort('trending')}
-              className={cn(
-                'px-2.5 py-1.5 rounded-full text-xs font-medium transition-all',
-                sort === 'trending' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500'
-              )}
-            >
-              화제순
-            </button>
-            <button
               onClick={() => setSort('latest')}
               className={cn(
                 'px-2.5 py-1.5 rounded-full text-xs font-medium transition-all',
@@ -114,6 +105,15 @@ export function TrendingTab() {
               )}
             >
               최신순
+            </button>
+            <button
+              onClick={() => setSort('trending')}
+              className={cn(
+                'px-2.5 py-1.5 rounded-full text-xs font-medium transition-all',
+                sort === 'trending' ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-500'
+              )}
+            >
+              화제순
             </button>
           </div>
         </div>

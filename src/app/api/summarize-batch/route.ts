@@ -6,7 +6,7 @@ import type { NewsItem } from '@/types/news'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const MAX_PER_RUN = 30 // Netlify 함수 타임아웃 내 처리 가능한 최대치
+const MAX_PER_RUN = 30
 const GEMINI_MODEL = 'gemini-2.5-flash-lite'
 
 type SummaryData = { lines: string[]; conclusion: string }
@@ -61,14 +61,6 @@ ${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${(item.summ
   return resultMap
 }
 
-function embedSummaries(items: NewsItem[], summaryMap: Map<string, SummaryData>): NewsItem[] {
-  return items.map((item) => {
-    const s = summaryMap.get(item.id)
-    if (!s) return item
-    return { ...item, summaryLines: s.lines, conclusion: s.conclusion }
-  })
-}
-
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret')
   if (secret !== process.env.CRON_SECRET) {
@@ -85,96 +77,52 @@ export async function POST(req: NextRequest) {
   console.log('[summarize-batch] 시작', new Date().toISOString())
 
   try {
-    // 1. news_cache 읽기 (batch-cron이 저장한 최신 뉴스)
-    const [trendingDoc, latestDoc] = await Promise.all([
-      db.collection('news_cache').doc('trending').get(),
-      db.collection('news_cache').doc('latest').get(),
-    ])
+    const articlesCol = db.collection('articles')
 
-    if (!trendingDoc.exists && !latestDoc.exists) {
-      console.log('[summarize-batch] news_cache 없음 → 크롤링 대기')
-      return NextResponse.json({ message: 'news_cache 없음, 크롤링 먼저 필요' })
-    }
+    // 최신 기사 조회 후 미요약 필터 (summaryGeneratedAt === null)
+    const snapshot = await articlesCol
+      .orderBy('publishedAt', 'desc')
+      .limit(MAX_PER_RUN * 3)
+      .get()
 
-    const trendingItems: NewsItem[] = (trendingDoc.data()?.items ?? []) as NewsItem[]
-    const latestItems: NewsItem[] = (latestDoc.data()?.items ?? []) as NewsItem[]
-    const allItems = [...trendingItems, ...latestItems]
-    const uniqueItems = Array.from(new Map(allItems.map((item) => [item.id, item])).values())
+    const allItems = snapshot.docs.map((doc) => {
+      const { expiresAt, ...data } = doc.data()
+      return data as NewsItem & { summaryGeneratedAt: unknown }
+    })
 
-    console.log(`[summarize-batch] news_cache 로드 완료 ${uniqueItems.length}개 elapsed=${Date.now() - start}ms`)
-
-    // 2. 이미 요약된 기사 확인
-    const summaryCol = db.collection('summaries')
-    const docRefs = uniqueItems.map((item) => summaryCol.doc(item.id))
-    const existingDocs = docRefs.length > 0
-      ? await db.getAll(...docRefs).catch(() => [])
-      : []
-
-    const existingSummaryMap = new Map<string, SummaryData>()
-    for (const doc of existingDocs) {
-      if (!doc.exists) continue
-      const data = doc.data()!
-      if (Array.isArray(data.lines) && data.lines.length > 0) {
-        existingSummaryMap.set(doc.id, {
-          lines: data.lines as string[],
-          conclusion: (data.conclusion as string) ?? '',
-        })
-      }
-    }
-
-    const existingIds = new Set(existingSummaryMap.keys())
-    const newItems = uniqueItems
-      .filter((item) => !existingIds.has(item.id))
+    const itemsToSummarize = allItems
+      .filter((item) => item.summaryGeneratedAt === null)
       .slice(0, MAX_PER_RUN)
 
-    console.log(`[summarize-batch] 미요약 ${newItems.length}개 (전체 ${uniqueItems.length}개) elapsed=${Date.now() - start}ms`)
+    console.log(`[summarize-batch] 미요약 ${itemsToSummarize.length}개 / 조회 ${allItems.length}개 elapsed=${Date.now() - start}ms`)
 
-    let newSummaryMap = new Map<string, SummaryData>()
-
-    if (newItems.length > 0) {
-      // 3. Gemini 배치 요약 (신규 기사만)
-      const genAI = new GoogleGenerativeAI(apiKey)
-      newSummaryMap = await summarizeBatch(newItems, genAI)
-      console.log(`[summarize-batch] Gemini 완료 ${newSummaryMap.size}개 elapsed=${Date.now() - start}ms`)
-
-      // 4. summaries 컬렉션 저장
-      if (newSummaryMap.size > 0) {
-        const batchWrite = db.batch()
-        for (const [id, summary] of newSummaryMap.entries()) {
-          const item = newItems.find((i) => i.id === id)
-          batchWrite.set(summaryCol.doc(id), {
-            lines: summary.lines,
-            conclusion: summary.conclusion,
-            title: item?.title ?? '',
-            generatedAt: new Date(),
-            source: item?.sourceName ?? '',
-          })
-        }
-        await batchWrite.commit()
-        console.log(`[summarize-batch] summaries 저장 완료 elapsed=${Date.now() - start}ms`)
-      }
+    if (itemsToSummarize.length === 0) {
+      return NextResponse.json({ message: '모든 기사 이미 요약됨', newlySummarized: 0 })
     }
 
-    // 5. news_cache 업데이트 (기존 + 신규 요약 embed)
-    const fullSummaryMap = new Map([...existingSummaryMap, ...newSummaryMap])
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const summaryMap = await summarizeBatch(itemsToSummarize, genAI)
+    console.log(`[summarize-batch] Gemini 완료 ${summaryMap.size}개 elapsed=${Date.now() - start}ms`)
 
-    if (fullSummaryMap.size > 0) {
-      const updatedAt = new Date().toISOString()
-      const finalTrending = embedSummaries(trendingItems, fullSummaryMap)
-      const finalLatest = embedSummaries(latestItems, fullSummaryMap)
+    if (summaryMap.size > 0) {
+      const batchWrite = db.batch()
+      const now = new Date()
 
-      await Promise.all([
-        db.collection('news_cache').doc('trending').set({ items: finalTrending, updatedAt }),
-        db.collection('news_cache').doc('latest').set({ items: finalLatest, updatedAt }),
-      ])
-      console.log(`[summarize-batch] news_cache 업데이트 완료 elapsed=${Date.now() - start}ms`)
+      for (const [id, summary] of summaryMap.entries()) {
+        batchWrite.update(articlesCol.doc(id), {
+          summaryLines: summary.lines,
+          conclusion: summary.conclusion,
+          summaryGeneratedAt: now,
+        })
+      }
+
+      await batchWrite.commit()
+      console.log(`[summarize-batch] articles 업데이트 완료 elapsed=${Date.now() - start}ms`)
     }
 
     return NextResponse.json({
-      message: newItems.length === 0 ? '모든 기사 이미 요약됨' : '요약 완료',
-      total: uniqueItems.length,
-      alreadySummarized: existingSummaryMap.size,
-      newlySummarized: newSummaryMap.size,
+      message: '요약 완료',
+      newlySummarized: summaryMap.size,
       elapsedMs: Date.now() - start,
     })
   } catch (err) {

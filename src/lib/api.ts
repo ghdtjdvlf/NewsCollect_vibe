@@ -19,7 +19,10 @@ export const newsApi = {
   },
 
   getLatest: async (params: FetchNewsParams = {}): Promise<NewsResponse> => {
-    const { data } = await client.get<NewsResponse>('/latest', { params })
+    const { cursor, ...rest } = params
+    const { data } = await client.get<NewsResponse>('/latest', {
+      params: cursor ? { ...rest, cursor } : rest,
+    })
     return data
   },
 

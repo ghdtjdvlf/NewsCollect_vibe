@@ -6,14 +6,6 @@ import { Clock, MessageSquare, TrendingUp, ExternalLink, Eye, Loader2 } from 'lu
 import { cn } from '@/lib/cn'
 import type { NewsItem } from '@/types/news'
 
-// ── 모듈 레벨 직렬 큐: 동시 Gemini 호출 방지 ──────────────
-let _summarizeQueue: Promise<void> = Promise.resolve()
-function enqueue<T>(fn: () => Promise<T>): Promise<T> {
-  const p = _summarizeQueue.then(fn)
-  _summarizeQueue = p.then(() => {}, () => {})
-  return p
-}
-
 const cardTransition = { ease: 'easeIn', duration: 0.2 }
 
 interface NewsCardProps {
@@ -24,14 +16,16 @@ interface NewsCardProps {
   viewMode?: 'list' | 'grid'
 }
 
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '방금 전'
-  if (minutes < 60) return `${minutes}분 전`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}시간 전`
-  return `${Math.floor(hours / 24)}일 전`
+function formatArticleDate(iso: string): string {
+  return new Date(iso).toLocaleString('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -85,7 +79,6 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
   const [summaryConclusion, setSummaryConclusion] = useState<string | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryError, setSummaryError] = useState('')
-  const [retryTrigger, setRetryTrigger] = useState(0)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const summarizeCalledRef = useRef(false)
@@ -130,37 +123,29 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
     setSummaryLoading(true)
     setSummaryError('')
 
-    console.log(`${tag} 요약요청 →`, item.url.slice(0, 60))
+    console.log(`${tag} 요약요청 →`, item.id)
 
-    enqueue(async () => {
-      const r = await fetch('/api/summarize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: item.id, title: item.title, summary: item.summary ?? lazyDesc, url: item.url }),
-      })
-      const data: { lines?: string[]; conclusion?: string; error?: string } = await r.json()
-
-      if (data.lines && data.lines.length > 0) {
-        console.log(`${tag} 요약성공 ✅ ${data.lines.length}줄`)
-        setSummaryLines(data.lines)
-        setSummaryConclusion(data.conclusion ?? null)
-      } else if (r.status === 429) {
-        console.warn(`${tag} 429 → 3초 후 자동 재시도`)
-        setSummaryError('잠시 후 자동으로 재시도합니다...')
-        summarizeCalledRef.current = false
-        setTimeout(() => setRetryTrigger((t) => t + 1), 3000)
-      } else {
-        const err = data.error ?? '요약에 실패했습니다.'
-        console.warn(`${tag} 요약실패 ❌`, err)
-        setSummaryError(err)
-      }
+    fetch('/api/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: item.id }),
     })
+      .then((r) => r.json())
+      .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {
+        if (data.lines && data.lines.length > 0) {
+          console.log(`${tag} 요약성공 ✅ ${data.lines.length}줄`)
+          setSummaryLines(data.lines)
+          setSummaryConclusion(data.conclusion ?? null)
+        } else {
+          console.log(`${tag} 요약 없음`)
+        }
+      })
       .catch((e) => {
         console.error(`${tag} 요약네트워크오류 ❌`, e)
         setSummaryError('네트워크 오류가 발생했습니다.')
       })
       .finally(() => setSummaryLoading(false))
-  }, [isExpanded, retryTrigger]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 열린 카드가 뷰포트에서 완전히 사라지면 자동 닫힘
   useEffect(() => {
@@ -303,7 +288,7 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
                 {item.sourceName.slice(0, 1)}
               </span>
               <span>{item.sourceName}</span>
-              <span className="ml-auto">{formatRelativeTime(item.publishedAt)}</span>
+              <span className="ml-auto">{formatArticleDate(item.publishedAt)}</span>
             </div>
           </div>
         </motion.article>
@@ -389,7 +374,7 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
           <div className="flex items-center gap-3 text-xs text-gray-400">
             <span className="flex items-center gap-1">
               <Clock className="w-3 h-3" />
-              {formatRelativeTime(item.publishedAt)}
+              {formatArticleDate(item.publishedAt)}
             </span>
             {item.commentCount !== undefined && (
               <span className="flex items-center gap-1">

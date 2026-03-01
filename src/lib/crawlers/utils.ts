@@ -14,13 +14,67 @@ export function randomId(prefix = 'n'): string {
   return `${prefix}_${Date.now()}_${(++counter).toString(36)}`
 }
 
+// 한국어 상대시간 → Date 변환
+function parseKoreanRelativeDate(str: string): Date | null {
+  const s = str.trim()
+  const now = new Date()
+
+  // "방금", "방금 전"
+  if (/^방금/.test(s)) return now
+
+  // "X분 전"
+  const min = s.match(/^(\d+)분\s*전$/)
+  if (min) { const d = new Date(now); d.setMinutes(d.getMinutes() - +min[1]); return d }
+
+  // "X시간 전"
+  const hour = s.match(/^(\d+)시간\s*전$/)
+  if (hour) { const d = new Date(now); d.setHours(d.getHours() - +hour[1]); return d }
+
+  // "어제"
+  if (/^어제/.test(s)) { const d = new Date(now); d.setDate(d.getDate() - 1); return d }
+
+  // "X일 전"
+  const day = s.match(/^(\d+)일\s*전$/)
+  if (day) { const d = new Date(now); d.setDate(d.getDate() - +day[1]); return d }
+
+  // "2026. 2. 25. 17:21" or "2025.01.15. 오후 3:45" or "2025.01.15."
+  // 점 뒤 공백 허용 (\.\s*)
+  const full = s.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(?:(오전|오후)?\s*(\d{1,2}):(\d{2}))?/)
+  if (full) {
+    let h = full[5] ? +full[5] : 0
+    const m = full[6] ? +full[6] : 0
+    if (full[4] === '오후' && h < 12) h += 12
+    if (full[4] === '오전' && h === 12) h = 0
+    return new Date(+full[1], +full[2] - 1, +full[3], h, m)
+  }
+
+  // "01.15. 오후 3:45" or "01.15." (올해 기준)
+  const short = s.match(/^(\d{1,2})\.\s*(\d{1,2})\.\s*(?:(오전|오후)?\s*(\d{1,2}):(\d{2}))?/)
+  if (short) {
+    let h = short[4] ? +short[4] : 0
+    const m = short[5] ? +short[5] : 0
+    if (short[3] === '오후' && h < 12) h += 12
+    if (short[3] === '오전' && h === 12) h = 0
+    return new Date(now.getFullYear(), +short[1] - 1, +short[2], h, m)
+  }
+
+  return null
+}
+
 export function toIso(dateStr?: string): string {
   if (!dateStr) return new Date().toISOString()
+
+  // 한국어 상대시간 먼저 시도
+  const korean = parseKoreanRelativeDate(dateStr)
+  if (korean) return korean.toISOString()
+
+  // 일반 날짜 문자열 파싱
   try {
-    return new Date(dateStr).toISOString()
-  } catch {
-    return new Date().toISOString()
-  }
+    const d = new Date(dateStr)
+    if (!isNaN(d.getTime())) return d.toISOString()
+  } catch { /* fall through */ }
+
+  return new Date().toISOString()
 }
 
 // ─── summary 정제 ─────────────────────────────────────────

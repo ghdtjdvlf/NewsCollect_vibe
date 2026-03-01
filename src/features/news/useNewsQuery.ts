@@ -19,15 +19,15 @@ export function useTrendingNews() {
 }
 
 // ─── 최신뉴스 (무한 스크롤) ──────────────────────────────
-export function useLatestNews(params: Omit<FetchNewsParams, 'page'> = {}) {
+export function useLatestNews(params: Omit<FetchNewsParams, 'cursor'> = {}) {
   const autoRefresh = useUIStore((s) => s.autoRefresh)
   return useInfiniteQuery({
     queryKey: ['latest', params],
-    queryFn: ({ pageParam = 1 }) =>
-      newsApi.getLatest({ ...params, page: pageParam as number }),
+    queryFn: ({ pageParam }) =>
+      newsApi.getLatest({ ...params, cursor: pageParam as string | null }),
     getNextPageParam: (lastPage) =>
-      lastPage.hasMore ? lastPage.page + 1 : undefined,
-    initialPageParam: 1,
+      lastPage.hasMore ? lastPage.nextCursor : undefined,
+    initialPageParam: null,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchInterval: autoRefresh ? REFETCH_INTERVAL : false,

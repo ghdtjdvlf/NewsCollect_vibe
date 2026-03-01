@@ -27,9 +27,10 @@ export function Header() {
   const { autoRefresh, setAutoRefresh } = useUIStore()
   const [batchLoading, setBatchLoading] = useState(false)
   const [batchMsg, setBatchMsg] = useState('')
-  const [countdown, setCountdown] = useState(getSecondsUntilNextBatch)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   useEffect(() => {
+    setCountdown(getSecondsUntilNextBatch())
     const id = setInterval(() => setCountdown(getSecondsUntilNextBatch()), 1000)
     return () => clearInterval(id)
   }, [])
@@ -40,7 +41,7 @@ export function Header() {
     try {
       const res = await fetch('/api/batch', {
         method: 'POST',
-        headers: { 'x-cron-secret': 'nc-batch-secret-2025' },
+        headers: { 'x-cron-secret': 'ddakseJul_cron_2024' },
       })
       const data = await res.json()
       setBatchMsg(data.message ?? data.error ?? '완료')
@@ -66,18 +67,20 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           {/* 다음 배치까지 카운트다운 */}
-          <div
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 rounded-full text-xs font-mono font-medium tabular-nums',
-              countdown <= 30
-                ? 'bg-amber-50 text-amber-500'
-                : 'bg-gray-100 text-gray-400'
-            )}
-            title="다음 뉴스 갱신까지 남은 시간"
-          >
-            <Timer className="w-3 h-3 shrink-0" />
-            <span>{formatCountdown(countdown)}</span>
-          </div>
+          {countdown !== null && (
+            <div
+              className={cn(
+                'flex items-center gap-1 px-2 py-1 rounded-full text-xs font-mono font-medium tabular-nums',
+                countdown <= 30
+                  ? 'bg-amber-50 text-amber-500'
+                  : 'bg-gray-100 text-gray-400'
+              )}
+              title="다음 뉴스 갱신까지 남은 시간"
+            >
+              <Timer className="w-3 h-3 shrink-0" />
+              <span>{formatCountdown(countdown)}</span>
+            </div>
+          )}
 
           {/* 배치 수동 실행 버튼 */}
           <button

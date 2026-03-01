@@ -1,28 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firebase'
 import { getTrendingNews, getLatestNews } from '@/lib/newsAggregator'
-import type { NewsItem, NewsCategory } from '@/types/news'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 25 // Netlify 함수 실제 타임아웃 기준
+export const maxDuration = 25
 
-// ─── 카테고리별 latest 문서 저장 ──────────────────────────
-async function saveCategoryDocs(items: NewsItem[], updatedAt: string): Promise<void> {
-  const groups = new Map<NewsCategory, NewsItem[]>()
-  for (const item of items) {
-    const arr = groups.get(item.category) ?? []
-    arr.push(item)
-    groups.set(item.category, arr)
-  }
-
-  await Promise.all(
-    [...groups.entries()].map(([cat, catItems]) =>
-      db.collection('news_cache').doc(`latest_${cat.replace(/\//g, '_')}`).set({ items: catItems, updatedAt })
-    )
-  )
-}
-
-// ─── POST 핸들러 ──────────────────────────────────────────
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret')
   if (secret !== process.env.CRON_SECRET) {
@@ -34,7 +16,6 @@ export async function POST(req: NextRequest) {
     const batchStart = Date.now()
     console.log('[batch] 시작', new Date().toISOString())
 
-    // 뉴스 수집 (enrichWithMeta/Gemini 제거 — Netlify 10초 타임아웃 방지)
     const [trendingData, latestData] = await Promise.all([
       getTrendingNews(),
       getLatestNews(undefined, 1, 100),
@@ -42,55 +23,68 @@ export async function POST(req: NextRequest) {
     console.log(`[batch] 크롤링 완료 trending=${trendingData.items.length} latest=${latestData.items.length} elapsed=${Date.now() - batchStart}ms`)
 
     const allItems = [...trendingData.items, ...latestData.items]
-    const uniqueItems = Array.from(
-      new Map(allItems.map((item) => [item.id, item])).values()
-    )
+    const uniqueItems = Array.from(new Map(allItems.map((item) => [item.id, item])).values())
 
     if (uniqueItems.length === 0) {
-      console.warn('[batch] 수집된 기사 없음 — 크롤러 전체 실패')
-      return NextResponse.json({ message: '수집된 기사 없음 (크롤러 실패)', total: 0, errors: [] })
+      console.warn('[batch] 수집된 기사 없음')
+      return NextResponse.json({ message: '수집된 기사 없음', total: 0 })
     }
 
-    // 기존 summaries 컬렉션에서 요약 일괄 조회 → news_cache 덮어쓸 때 유실 방지
-    const summaryCol = db.collection('summaries')
-    const docRefs = uniqueItems.map((item) => summaryCol.doc(item.id))
-    const summaryDocs = docRefs.length > 0
-      ? await db.getAll(...docRefs).catch(() => [])
-      : []
+    const articlesCol = db.collection('articles')
 
-    const summaryMap = new Map<string, { lines: string[]; conclusion: string }>()
-    for (const doc of summaryDocs) {
-      if (!doc.exists) continue
-      const data = doc.data()!
-      if (Array.isArray(data.lines) && data.lines.length > 0) {
-        summaryMap.set(doc.id, { lines: data.lines as string[], conclusion: (data.conclusion as string) ?? '' })
+    // 기존 기사 확인 (이미 존재하는 기사는 summaryGeneratedAt 초기화 방지)
+    const docRefs = uniqueItems.map((item) => articlesCol.doc(item.id))
+    const existingDocs = await db.getAll(...docRefs).catch(() => [])
+    const existingIds = new Set(existingDocs.filter((d) => d.exists).map((d) => d.id))
+
+    // articles 저장 (500개 Firestore 배치 제한 준수)
+    const CHUNK = 500
+    for (let i = 0; i < uniqueItems.length; i += CHUNK) {
+      const chunk = uniqueItems.slice(i, i + CHUNK)
+      const batchWrite = db.batch()
+
+      for (const item of chunk) {
+        const expiresAt = new Date(item.publishedAt)
+        expiresAt.setDate(expiresAt.getDate() + 4) // 4일 후 TTL
+
+        const articleData: Record<string, unknown> = { ...item, expiresAt }
+
+        // 신규 기사만 summaryGeneratedAt: null 초기화
+        if (!existingIds.has(item.id)) {
+          articleData.summaryGeneratedAt = null
+        }
+
+        batchWrite.set(articlesCol.doc(item.id), articleData, { merge: true })
       }
-    }
-    console.log(`[batch] summaries 조회 완료 ${summaryMap.size}개 매핑`)
 
-    function embedSummaries(items: NewsItem[]): NewsItem[] {
-      return items.map((item) => {
-        const s = summaryMap.get(item.id)
-        if (!s) return item
-        return { ...item, summaryLines: s.lines, conclusion: s.conclusion }
-      })
+      await batchWrite.commit()
     }
 
-    const trendingWithSummary = embedSummaries(trendingData.items)
-    const latestWithSummary = embedSummaries(latestData.items)
+    // feeds/trending: ID 목록만 저장 (트렌딩 순서 유지)
+    await db.collection('feeds').doc('trending').set({
+      ids: trendingData.items.map((item) => item.id),
+      updatedAt: new Date().toISOString(),
+    })
 
-    // news_cache 저장 (기존 요약 embed 포함)
-    const updatedAt = new Date().toISOString()
-    await Promise.all([
-      db.collection('news_cache').doc('trending').set({ items: trendingWithSummary, updatedAt }),
-      db.collection('news_cache').doc('latest').set({ items: latestWithSummary, updatedAt }),
-      saveCategoryDocs(latestWithSummary, updatedAt),
-    ])
     const elapsed = Date.now() - batchStart
-    console.log(`[batch] news_cache 저장 완료 elapsed=${elapsed}ms (trending:${trendingData.items.length} latest:${latestData.items.length})`)
+    console.log(`[batch] 완료 articles=${uniqueItems.length} elapsed=${elapsed}ms`)
+
+    // 수집 완료 후 요약 배치 트리거 (fire-and-forget)
+    const siteUrl = process.env.URL ?? process.env.NEXT_PUBLIC_BASE_URL
+    if (siteUrl) {
+      fetch(`${siteUrl}/api/summarize-batch`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-cron-secret': process.env.CRON_SECRET ?? '',
+        },
+      })
+        .then(() => console.log('[batch] 요약 배치 트리거 완료'))
+        .catch((e) => console.error('[batch] 요약 배치 트리거 실패:', e instanceof Error ? e.message : e))
+    }
 
     return NextResponse.json({
-      message: '뉴스 캐시 갱신 완료',
+      message: '수집 완료',
       total: uniqueItems.length,
       elapsedMs: elapsed,
     })

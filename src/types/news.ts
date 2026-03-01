@@ -63,8 +63,7 @@ export interface NewsCluster {
 // ─── API 응답 ─────────────────────────────────────────────
 export interface NewsResponse {
   items: NewsItem[]
-  total: number
-  page: number
+  nextCursor: string | null
   hasMore: boolean
   updatedAt: string
 }
@@ -84,7 +83,7 @@ export interface SearchResponse {
 // ─── 크롤링 파라미터 ─────────────────────────────────────
 export interface FetchNewsParams {
   category?: NewsCategory
-  page?: number
+  cursor?: string | null
   limit?: number
   sources?: NewsPortal[]
 }

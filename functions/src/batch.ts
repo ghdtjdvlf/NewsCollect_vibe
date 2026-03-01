@@ -113,7 +113,7 @@ async function summarizeBatch(
   items: NewsItem[],
   genAI: GoogleGenerativeAI
 ): Promise<Map<string, SummaryData>> {
-  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
+  const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite-001' })
 
   const prompt = `다음 뉴스들을 각각 3줄(음슴체)로 요약하고 결론을 추가해줘.
 어려운 말은 쉽게 바꾸고 핵심만 담아줘.

@@ -136,15 +136,14 @@ export async function getLatestNews(
 
   cacheNewsItems(items)
 
-  const total = items.length
   const start = (page - 1) * limit
   const pageItems = items.slice(start, start + limit)
+  const hasMore = start + limit < items.length
 
   const response: NewsResponse = {
     items: pageItems,
-    total,
-    page,
-    hasMore: start + limit < total,
+    nextCursor: null,
+    hasMore,
     updatedAt: new Date().toISOString(),
   }
 
