@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import Groq from 'groq-sdk'
 import { db } from '@/lib/firebase'
 import type { NewsItem } from '@/types/news'
 
@@ -7,16 +7,15 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const MAX_PER_RUN = 30
-const GEMINI_MODEL = 'gemini-2.5-flash-lite'
+const GROQ_MODEL = 'llama-3.3-70b-versatile'
+const MIN_INTERVAL_MS = 50 * 1000 // 50초 쿨다운
 
 type SummaryData = { lines: string[]; conclusion: string }
 
 async function summarizeBatch(
   items: NewsItem[],
-  genAI: GoogleGenerativeAI
+  groq: Groq
 ): Promise<Map<string, SummaryData>> {
-  const model = genAI.getGenerativeModel({ model: GEMINI_MODEL })
-
   const prompt = `다음 뉴스들을 각각 3줄(음슴체)로 요약하고 결론을 추가해줘.
 어려운 말은 쉽게 바꾸고 핵심만 담아줘.
 
@@ -35,8 +34,14 @@ ${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${(item.summ
 줄3
 결론: 비유내용`
 
-  const result = await model.generateContent(prompt)
-  const text = result.response.text()
+  const completion = await groq.chat.completions.create({
+    model: GROQ_MODEL,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.4,
+    max_tokens: 4096,
+  })
+
+  const text = completion.choices[0]?.message?.content ?? ''
 
   const resultMap = new Map<string, SummaryData>()
   const blocks = text.split(/\[(\d+)\]/).filter((s) => s.trim())
@@ -64,29 +69,69 @@ ${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${(item.summ
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-cron-secret')
   if (secret !== process.env.CRON_SECRET) {
-    console.warn('[summarize-batch] 인증 실패')
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const apiKey = process.env.GOOGLE_API_KEY
+  const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
-    return NextResponse.json({ error: 'GOOGLE_API_KEY 없음' }, { status: 503 })
+    return NextResponse.json({ error: 'GROQ_API_KEY 없음' }, { status: 503 })
   }
 
-  const start = Date.now()
-  console.log('[summarize-batch] 시작', new Date().toISOString())
-
   try {
+    // 50초 쿨다운
+    const metaDoc = await db.collection('meta').doc('summarize').get()
+    const metaData = metaDoc.exists ? (metaDoc.data() ?? {}) : {}
+    const lastRun: number = metaData.lastRunAt ?? 0
+    const elapsed = Date.now() - lastRun
+    if (elapsed < MIN_INTERVAL_MS) {
+      const waitSec = Math.ceil((MIN_INTERVAL_MS - elapsed) / 1000)
+      console.log(`요약까지 ${waitSec}초`)
+      return NextResponse.json({ message: '쿨다운 중', newlySummarized: 0 })
+    }
+
     const articlesCol = db.collection('articles')
 
-    // 최신 기사 조회 후 미요약 필터 (summaryGeneratedAt === null)
+    // 전체 미요약 수
+    const totalCountSnap = await articlesCol
+      .where('summaryGeneratedAt', '==', null)
+      .count()
+      .get()
+    const totalUnsummarized: number = totalCountSnap.data().count
+
+    if (totalUnsummarized === 0) {
+      return NextResponse.json({ message: '모든 기사 이미 요약됨', newlySummarized: 0 })
+    }
+
+    // 사이클 추적
+    const prevCycleTotal: number = metaData.cycleTotal ?? 0
+    const prevCycleDone: number = metaData.cycleDone ?? 0
+
+    let cycleTotal: number
+    let cycleDone: number
+
+    if (prevCycleTotal === 0 || prevCycleDone >= prevCycleTotal) {
+      cycleTotal = totalUnsummarized
+      cycleDone = 0
+    } else {
+      cycleTotal = prevCycleTotal
+      cycleDone = prevCycleDone
+      const expectedRemaining = cycleTotal - cycleDone
+      if (totalUnsummarized > expectedRemaining) {
+        cycleTotal = cycleDone + totalUnsummarized
+      }
+    }
+
+    const totalBatches = Math.ceil(cycleTotal / MAX_PER_RUN)
+    const currentBatch = Math.floor(cycleDone / MAX_PER_RUN) + 1
+
+    // 미요약 기사 조회
     const snapshot = await articlesCol
       .orderBy('publishedAt', 'desc')
       .limit(MAX_PER_RUN * 3)
       .get()
 
     const allItems = snapshot.docs.map((doc) => {
-      const { expiresAt, ...data } = doc.data()
+      const { expiresAt: _e, ...data } = doc.data()
       return data as NewsItem & { summaryGeneratedAt: unknown }
     })
 
@@ -94,15 +139,20 @@ export async function POST(req: NextRequest) {
       .filter((item) => item.summaryGeneratedAt === null)
       .slice(0, MAX_PER_RUN)
 
-    console.log(`[summarize-batch] 미요약 ${itemsToSummarize.length}개 / 조회 ${allItems.length}개 elapsed=${Date.now() - start}ms`)
-
     if (itemsToSummarize.length === 0) {
       return NextResponse.json({ message: '모든 기사 이미 요약됨', newlySummarized: 0 })
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const summaryMap = await summarizeBatch(itemsToSummarize, genAI)
-    console.log(`[summarize-batch] Gemini 완료 ${summaryMap.size}개 elapsed=${Date.now() - start}ms`)
+    console.log(`요약 시작 ${currentBatch}/${totalBatches}`)
+
+    await db.collection('meta').doc('summarize').set({
+      lastRunAt: Date.now(),
+      cycleTotal,
+      cycleDone,
+    })
+
+    const groq = new Groq({ apiKey })
+    const summaryMap = await summarizeBatch(itemsToSummarize, groq)
 
     if (summaryMap.size > 0) {
       const batchWrite = db.batch()
@@ -117,16 +167,25 @@ export async function POST(req: NextRequest) {
       }
 
       await batchWrite.commit()
-      console.log(`[summarize-batch] articles 업데이트 완료 elapsed=${Date.now() - start}ms`)
+
+      const newCycleDone = cycleDone + summaryMap.size
+      const isLastBatch = newCycleDone >= cycleTotal
+
+      if (isLastBatch) {
+        console.log(`요약 완료 ${currentBatch}/${totalBatches}`)
+      } else {
+        console.log(`요약 ${currentBatch}/${totalBatches}`)
+      }
+      console.log(`요약 데이터 저장 완료 — ${newCycleDone}/${cycleTotal}개`)
+
+      await db.collection('meta').doc('summarize').update({ cycleDone: newCycleDone })
     }
 
     return NextResponse.json({
       message: '요약 완료',
       newlySummarized: summaryMap.size,
-      elapsedMs: Date.now() - start,
     })
   } catch (err) {
-    console.error('[summarize-batch] 오류:', err instanceof Error ? err.message : err)
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '오류 발생' },
       { status: 500 }
