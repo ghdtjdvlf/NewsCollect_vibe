@@ -7,9 +7,8 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 25
 
 function docToNewsItem(data: Record<string, unknown>): NewsItem {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { expiresAt, summaryGeneratedAt, ...rest } = data
-  return rest as NewsItem
+  const { expiresAt: _e, summaryGeneratedAt: _s, ...rest } = data
+  return rest as unknown as NewsItem
 }
 
 export async function GET() {

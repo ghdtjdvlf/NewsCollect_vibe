@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { LayoutGrid, List } from 'lucide-react'
 import { NewsCard } from '@/components/NewsCard'
 import { useLatestNews } from './useNewsQuery'
-import type { NewsCategory } from '@/types/news'
+import type { NewsCategory, NewsResponse } from '@/types/news'
 import { cn } from '@/lib/cn'
 
 const BASE_CATEGORIES: (NewsCategory | '전체')[] = ['전체', '경제', '사건사고', '사회', '정치']
@@ -25,7 +25,7 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
 
   // Fix: p.items 가 undefined 일 때 flatMap 오류 방지
   const allItems = useMemo(
-    () => data?.pages.flatMap((p) => p.items ?? []) ?? [],
+    () => data?.pages.flatMap((p) => (p as NewsResponse).items ?? []) ?? [],
     [data]
   )
 

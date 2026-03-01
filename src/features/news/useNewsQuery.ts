@@ -27,7 +27,7 @@ export function useLatestNews(params: Omit<FetchNewsParams, 'cursor'> = {}) {
       newsApi.getLatest({ ...params, cursor: pageParam as string | null }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore ? lastPage.nextCursor : undefined,
-    initialPageParam: null,
+    initialPageParam: null as string | null,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchInterval: autoRefresh ? REFETCH_INTERVAL : false,
