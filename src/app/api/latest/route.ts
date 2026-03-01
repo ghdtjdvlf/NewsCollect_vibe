@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
   // 1. Firebase 캐시 확인
   try {
     // category 있으면 카테고리 전용 문서 우선 조회 (데이터 1/8 수준)
-    const docId = category ? `latest_${category}` : 'latest'
+    const docId = category ? `latest_${category.replace(/\//g, '_')}` : 'latest'
     const doc = await db.collection('news_cache').doc(docId).get()
 
     if (doc.exists) {

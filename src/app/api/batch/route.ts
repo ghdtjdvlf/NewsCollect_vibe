@@ -17,7 +17,7 @@ async function saveCategoryDocs(items: NewsItem[], updatedAt: string): Promise<v
 
   await Promise.all(
     [...groups.entries()].map(([cat, catItems]) =>
-      db.collection('news_cache').doc(`latest_${cat}`).set({ items: catItems, updatedAt })
+      db.collection('news_cache').doc(`latest_${cat.replace(/\//g, '_')}`).set({ items: catItems, updatedAt })
     )
   )
 }
