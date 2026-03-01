@@ -16,7 +16,10 @@ function initFirebase() {
   })
 }
 
+const isNew = getApps().length === 0
 initFirebase()
-
 export const db = getFirestore()
-db.settings({ ignoreUndefinedProperties: true })
+// settings()는 첫 초기화 시에만 호출 가능 (dev 핫리로드 중복 호출 방지)
+if (isNew) {
+  db.settings({ ignoreUndefinedProperties: true })
+}

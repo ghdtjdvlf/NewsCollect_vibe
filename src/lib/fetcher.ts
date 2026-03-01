@@ -149,6 +149,12 @@ function cleanText(text: string): string {
     .replace(/&apos;/g, "'")
     .replace(/&nbsp;/g, ' ')
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)))
+    // 한국어 저작권/노이즈 패턴 제거
+    .replace(/무단\s*전재(\s*및\s*재배포)?\s*(금지|禁止)?.*$/i, '')
+    .replace(/저작권.*$/i, '')
+    .replace(/ⓒ\s*\S+.*$/, '')
+    .replace(/Copyright\s*.*$/i, '')
+    .replace(/[가-힣]{2,5}\s*기자\s*=?\s*$/, '')
     .replace(/\s+/g, ' ')
     .trim()
 }

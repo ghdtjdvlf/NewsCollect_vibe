@@ -20,7 +20,7 @@ async function summarizeBatch(
   const prompt = `다음 뉴스들을 각각 3줄(음슴체)로 요약하고 결론을 추가해줘.
 어려운 말은 쉽게 바꾸고 핵심만 담아줘.
 
-${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${item.summary ?? ''}`).join('\n\n')}
+${items.map((item, i) => `[${i + 1}] 제목: ${item.title}\n내용: ${(item.summary ?? '').slice(0, 300)}`).join('\n\n')}
 
 출력 형식 (번호와 줄바꿈만 사용, 다른 설명 없이):
 [1]

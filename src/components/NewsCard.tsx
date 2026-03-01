@@ -21,6 +21,7 @@ interface NewsCardProps {
   className?: string
   expandedId?: string | null
   onExpand?: (id: string | null) => void
+  viewMode?: 'list' | 'grid'
 }
 
 function formatRelativeTime(iso: string): string {
@@ -45,6 +46,13 @@ const CATEGORY_COLORS: Record<string, string> = {
   기타: 'bg-gray-50 text-gray-500',
 }
 
+// 포털별 로고 색상
+const SOURCE_COLORS: Record<string, string> = {
+  naver: 'bg-green-500',
+  daum: 'bg-blue-500',
+  google: 'bg-red-500',
+}
+
 const CATEGORY_THUMB_BG: Record<string, string> = {
   경제: 'from-blue-400 to-blue-600',
   사건사고: 'from-red-400 to-red-600',
@@ -60,7 +68,7 @@ const CATEGORY_THUMB_BG: Record<string, string> = {
 // 썸네일 + description 메모리 캐시 (최대 300개)
 const thumbCache = new Map<string, { thumbnail: string | null; description: string | null }>()
 
-export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProps) {
+export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'list' }: NewsCardProps) {
   const controlledExpanded = expandedId !== undefined ? expandedId === item.id : undefined
   const [internalExpanded, setInternalExpanded] = useState(false)
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded
@@ -214,7 +222,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [item.id, item.url, item.thumbnail, item.summary])
+  }, [item.id, item.url, item.thumbnail, item.summary]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 이미지 로드 성공
   function handleImgLoad(e: React.SyntheticEvent<HTMLImageElement>) {
@@ -249,6 +257,60 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
   const bodyText = item.summary || lazyDesc
   const thumbGradient = CATEGORY_THUMB_BG[item.category] ?? CATEGORY_THUMB_BG['기타']
 
+  // ── 그리드 뷰 (compact 카드) ───────────────────────────
+  if (viewMode === 'grid') {
+    return (
+      <div ref={wrapRef}>
+        <motion.article
+          onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+          className={cn(
+            'bg-white rounded-2xl overflow-hidden cursor-pointer select-none',
+            'border border-gray-100 shadow-sm',
+            className
+          )}
+          whileTap={{ scale: 0.97 }}
+          transition={cardTransition}
+        >
+          {/* 썸네일 */}
+          {thumbnail ? (
+            <div className="relative w-full h-28 overflow-hidden">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/image-proxy?url=${encodeURIComponent(thumbnail)}`}
+                alt={item.title}
+                className="absolute inset-0 w-full h-full object-cover"
+                loading="lazy"
+                onLoad={handleImgLoad}
+                onError={handleImgError}
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+              <span className={cn('absolute bottom-2 left-2 text-[10px] px-1.5 py-0.5 rounded-full font-medium', CATEGORY_COLORS[item.category] ?? CATEGORY_COLORS['기타'])}>
+                {item.category}
+              </span>
+            </div>
+          ) : (
+            <div className={cn('w-full h-16 bg-gradient-to-br flex items-end p-2', thumbGradient)}>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-white/20 text-white font-medium">
+                {item.category}
+              </span>
+            </div>
+          )}
+          <div className="p-2.5 space-y-1.5">
+            <p className="text-xs font-semibold text-gray-900 leading-snug line-clamp-2">{item.title}</p>
+            <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+              <span className={cn('w-3.5 h-3.5 rounded-full flex items-center justify-center text-white shrink-0', SOURCE_COLORS[item.source] ?? 'bg-gray-400')}
+                style={{ fontSize: '7px', fontWeight: 700 }}>
+                {item.sourceName.slice(0, 1)}
+              </span>
+              <span>{item.sourceName}</span>
+              <span className="ml-auto">{formatRelativeTime(item.publishedAt)}</span>
+            </div>
+          </div>
+        </motion.article>
+      </div>
+    )
+  }
+
   return (
     <div ref={wrapRef}>
       <motion.article
@@ -259,6 +321,7 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
           className
         )}
         whileTap={{ scale: 0.98 }}
+        transition={cardTransition}
       >
         {/* 썸네일 */}
         {thumbnail ? (
@@ -288,6 +351,10 @@ export function NewsCard({ item, className, expandedId, onExpand }: NewsCardProp
           <div className="flex items-center gap-2">
             <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', CATEGORY_COLORS[item.category] ?? CATEGORY_COLORS['기타'])}>
               {item.category}
+            </span>
+            <span className={cn('w-4 h-4 rounded-full flex items-center justify-center text-white shrink-0', SOURCE_COLORS[item.source] ?? 'bg-gray-400')}
+              style={{ fontSize: '8px', fontWeight: 700 }}>
+              {item.sourceName.slice(0, 1)}
             </span>
             <span className="text-xs text-gray-400 font-bold">{item.sourceName}</span>
             {item.trendScore !== undefined && (

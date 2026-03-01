@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState, useMemo } from 'react'
+import { LayoutGrid, List } from 'lucide-react'
 import { NewsCard } from '@/components/NewsCard'
 import { useLatestNews } from './useNewsQuery'
 import type { NewsCategory } from '@/types/news'
+import { cn } from '@/lib/cn'
 
 const BASE_CATEGORIES: (NewsCategory | '전체')[] = ['전체', '경제', '사건사고', '사회', '정치']
 
@@ -13,6 +15,7 @@ interface LatestTabProps {
 }
 
 export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps) {
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
   const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useLatestNews({ category: selectedCategory })
 
@@ -54,43 +57,78 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
 
   return (
     <div className="space-y-3">
-      {/* 카테고리 필터 — pointerDown stopPropagation으로 부모 drag(탭 전환) 차단 */}
-      <div
-        className="flex gap-2 overflow-x-auto scrollbar-hide pb-1"
-        onPointerDown={(e) => e.stopPropagation()}
-      >
-        {displayCategories.map((cat) => {
-          const isActive = cat === '전체' ? !selectedCategory : selectedCategory === cat
-          return (
-            <button
-              key={cat}
-              onClick={() => onCategoryChange?.(cat === '전체' ? undefined : cat)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-indigo-500 text-white'
-                  : 'bg-gray-100 text-gray-500'
-              }`}
-            >
-              {cat}
-            </button>
-          )
-        })}
+      {/* 카테고리 필터 + 뷰 토글 */}
+      <div className="flex items-center gap-2">
+        <div
+          className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 flex-1"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {displayCategories.map((cat) => {
+            const isActive = cat === '전체' ? !selectedCategory : selectedCategory === cat
+            return (
+              <button
+                key={cat}
+                onClick={() => onCategoryChange?.(cat === '전체' ? undefined : cat)}
+                className={cn(
+                  'shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                  isActive ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-500'
+                )}
+              >
+                {cat}
+              </button>
+            )
+          })}
+        </div>
+        {/* 그리드/리스트 토글 */}
+        <div
+          className="flex gap-1 shrink-0"
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => setViewMode('list')}
+            className={cn(
+              'p-1.5 rounded-lg transition-all',
+              viewMode === 'list' ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-400'
+            )}
+          >
+            <List className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setViewMode('grid')}
+            className={cn(
+              'p-1.5 rounded-lg transition-all',
+              viewMode === 'grid' ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-400'
+            )}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* 뉴스 리스트 */}
       {isLoading ? (
-        Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
-            <div className="p-4 space-y-2.5">
-              <div className="flex gap-2">
-                <div className="shimmer h-5 w-14 rounded-full" />
-                <div className="shimmer h-5 w-20 rounded-full" />
+        Array.from({ length: viewMode === 'grid' ? 6 : 5 }).map((_, i) => (
+          viewMode === 'grid' ? (
+            <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+              <div className="shimmer h-28 w-full" />
+              <div className="p-2.5 space-y-1.5">
+                <div className="shimmer h-3.5 w-full rounded" />
+                <div className="shimmer h-3 w-3/4 rounded" />
               </div>
-              <div className="shimmer h-4 w-full rounded" />
-              <div className="shimmer h-4 w-3/4 rounded" />
-              <div className="shimmer h-3 w-24 rounded" />
             </div>
-          </div>
+          ) : (
+            <div key={i} className="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+              <div className="p-4 space-y-2.5">
+                <div className="flex gap-2">
+                  <div className="shimmer h-5 w-14 rounded-full" />
+                  <div className="shimmer h-5 w-20 rounded-full" />
+                </div>
+                <div className="shimmer h-4 w-full rounded" />
+                <div className="shimmer h-4 w-3/4 rounded" />
+                <div className="shimmer h-3 w-24 rounded" />
+              </div>
+            </div>
+          )
         ))
       ) : isError ? (
         <div className="flex flex-col items-center gap-2 py-12 text-gray-400">
@@ -103,6 +141,16 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
           <span className="text-2xl">📭</span>
           <p className="text-sm">불러올 뉴스가 없습니다.</p>
           <p className="text-xs">헤더의 ⚡ 배치실행을 눌러 뉴스를 수집해주세요.</p>
+        </div>
+      ) : viewMode === 'grid' ? (
+        <div className="grid grid-cols-2 gap-3">
+          {allItems.map((item) => (
+            <NewsCard
+              key={item.id}
+              item={item}
+              viewMode="grid"
+            />
+          ))}
         </div>
       ) : (
         <div className="space-y-3">

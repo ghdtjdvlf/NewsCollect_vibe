@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { stableId, toIso, guessCategory } from './utils'
+import { stableId, toIso, guessCategory, cleanSummary } from './utils'
 
 // 다음 뉴스 섹션 경로
 const DAUM_SECTION: Partial<Record<NewsCategory, string>> = {
@@ -75,7 +75,7 @@ export async function fetchDaumSection(
 
       // 날짜 + 본문 미리보기 추출
       const dateText = $(el).find('.info_view, .txt_time').text().trim()
-      const summary = $(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text().trim() || undefined
+      const summary = cleanSummary($(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text())
 
       items.push({
         id: stableId(fullUrl, 'd'),

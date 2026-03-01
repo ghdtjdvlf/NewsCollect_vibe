@@ -45,8 +45,8 @@ export async function fetchDcinsideBest(limit = 30): Promise<CommunityPost[]> {
         const commentText = $(el).find('.reply_num, .gall_comment').text().replace(/\D/g, '')
         const viewText = $(el).find('.gall_count').text().replace(/\D/g, '')
 
-        // href가 비어있으면 메인 페이지로 잘못 이동하므로 skip
-        if (!title || title.length < 3 || !href) return
+        // href가 비어있거나 javascript: 링크이면 skip
+        if (!title || title.length < 3 || !href || href.startsWith('javascript:')) return
 
         // 상대 경로 처리: /board/view/... 또는 ?no=... 형태
         let fullUrl: string

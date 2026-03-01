@@ -51,12 +51,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: '수집된 기사 없음 (크롤러 실패)', total: 0, errors: [] })
     }
 
-    // news_cache 저장 (요약 없이 빠르게)
+    // 기존 summaries 컬렉션에서 요약 일괄 조회 → news_cache 덮어쓸 때 유실 방지
+    const summaryCol = db.collection('summaries')
+    const docRefs = uniqueItems.map((item) => summaryCol.doc(item.id))
+    const summaryDocs = docRefs.length > 0
+      ? await db.getAll(...docRefs).catch(() => [])
+      : []
+
+    const summaryMap = new Map<string, { lines: string[]; conclusion: string }>()
+    for (const doc of summaryDocs) {
+      if (!doc.exists) continue
+      const data = doc.data()!
+      if (Array.isArray(data.lines) && data.lines.length > 0) {
+        summaryMap.set(doc.id, { lines: data.lines as string[], conclusion: (data.conclusion as string) ?? '' })
+      }
+    }
+    console.log(`[batch] summaries 조회 완료 ${summaryMap.size}개 매핑`)
+
+    function embedSummaries(items: NewsItem[]): NewsItem[] {
+      return items.map((item) => {
+        const s = summaryMap.get(item.id)
+        if (!s) return item
+        return { ...item, summaryLines: s.lines, conclusion: s.conclusion }
+      })
+    }
+
+    const trendingWithSummary = embedSummaries(trendingData.items)
+    const latestWithSummary = embedSummaries(latestData.items)
+
+    // news_cache 저장 (기존 요약 embed 포함)
     const updatedAt = new Date().toISOString()
     await Promise.all([
-      db.collection('news_cache').doc('trending').set({ items: trendingData.items, updatedAt }),
-      db.collection('news_cache').doc('latest').set({ items: latestData.items, updatedAt }),
-      saveCategoryDocs(latestData.items, updatedAt),
+      db.collection('news_cache').doc('trending').set({ items: trendingWithSummary, updatedAt }),
+      db.collection('news_cache').doc('latest').set({ items: latestWithSummary, updatedAt }),
+      saveCategoryDocs(latestWithSummary, updatedAt),
     ])
     const elapsed = Date.now() - batchStart
     console.log(`[batch] news_cache 저장 완료 elapsed=${elapsed}ms (trending:${trendingData.items.length} latest:${latestData.items.length})`)

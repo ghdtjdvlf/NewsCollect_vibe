@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { stableId, toIso, guessCategory } from './utils'
+import { stableId, toIso, guessCategory, cleanSummary } from './utils'
 
 // 네이버 뉴스 섹션 ID
 const NAVER_SECTION: Record<string, string> = {
@@ -73,7 +73,7 @@ export async function fetchNaverSection(
       const press = $(el).find('.sa_text_press').text().trim() || '네이버뉴스'
       const dateText = $(el).find('.sa_text_datetime_bullet').text().trim()
       // 기사 본문 미리보기 (이미지와 함께 수집)
-      const summary = $(el).find('.sa_text_lede, .sa_desc, .lede').text().trim() || undefined
+      const summary = cleanSummary($(el).find('.sa_text_lede, .sa_desc, .lede').text())
 
       items.push({
         id: stableId(link, 'n'),
