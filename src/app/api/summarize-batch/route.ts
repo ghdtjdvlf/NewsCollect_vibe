@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const MAX_PER_RUN = 200 // 미요약 기사 전체 처리 (gemini-1.5-flash 컨텍스트 1M 토큰)
-const GEMINI_MODEL = 'gemini-2.5-flash-lite-preview-06-17'
+const GEMINI_MODEL = 'gemini-2.0-flash'
 
 type SummaryData = { lines: string[]; conclusion: string }
 
