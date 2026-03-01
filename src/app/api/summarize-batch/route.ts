@@ -6,7 +6,7 @@ import type { NewsItem } from '@/types/news'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
-const MAX_PER_RUN = 200 // 미요약 기사 전체 처리 (gemini-1.5-flash 컨텍스트 1M 토큰)
+const MAX_PER_RUN = 30 // Netlify 함수 타임아웃 내 처리 가능한 최대치
 const GEMINI_MODEL = 'gemini-2.5-flash-lite'
 
 type SummaryData = { lines: string[]; conclusion: string }
