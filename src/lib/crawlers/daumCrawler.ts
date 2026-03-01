@@ -74,11 +74,21 @@ export async function fetchDaumSection(
       const fullUrl = link.startsWith('http') ? link : `https://news.daum.net${link}`
 
       // 날짜: 여러 셀렉터 순서대로 시도
-      const dateText =
+      let dateText =
         $(el).find('[data-published-time]').attr('data-published-time') ||
         $(el).find('[datetime]').attr('datetime') ||
         $(el).find('.info_view, .txt_time, .date, .info_date, time').first().text().trim() ||
         ''
+      // .txt_info 중 시간 관련 텍스트 추출 (예: "46분 전", "1시간 전")
+      if (!dateText) {
+        $(el).find('.txt_info').each((_, span) => {
+          const t = $(span).text().trim()
+          if (/\d+분 전|\d+시간 전|어제|방금|\d+일 전|\d{4}\./.test(t)) {
+            dateText = t
+            return false
+          }
+        })
+      }
       const summary = cleanSummary($(el).find('.desc_txt, .desc, .tit_desc, .news_desc').text())
 
       items.push({

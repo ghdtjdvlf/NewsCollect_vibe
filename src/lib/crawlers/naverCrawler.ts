@@ -22,6 +22,25 @@ const BASE_HEADERS = {
   Referer: 'https://news.naver.com/',
 }
 
+// ─── 개별 기사 페이지에서 발행시간 추출 ──────────────────
+async function fetchNaverArticleDate(articleUrl: string): Promise<string | null> {
+  try {
+    const html = await fetchWithRetry(articleUrl, {
+      timeout: 6000,
+      headers: { ...BASE_HEADERS, Referer: 'https://news.naver.com/' },
+    })
+    const $ = load(html)
+    // data-date-time="2026-02-28 09:41:10" (KST)
+    const dateTime = $('._ARTICLE_DATE_TIME').attr('data-date-time')
+    if (dateTime) {
+      return new Date(dateTime.replace(' ', 'T') + '+09:00').toISOString()
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 // ─── 섹션 HTML 크롤링 (이미지 포함) ─────────────────────
 export async function fetchNaverSection(
   category: NewsCategory,
@@ -35,9 +54,13 @@ export async function fetchNaverSection(
     const html = await fetchWithRetry(url, { timeout: 10000, headers: BASE_HEADERS })
     const $ = load(html)
     const items: NewsItem[] = []
+    const noDateIndices: number[] = []
 
     $('.sa_item').each((_, el) => {
       if (items.length >= limit) return false
+
+      // _SECTION_HEADLINE 아이템은 날짜 없음 → 스킵, AI추천 기사만 수집
+      if ($(el).hasClass('_SECTION_HEADLINE')) return
 
       // 제목 + 링크
       const titleEl = $(el).find('.sa_text_title')
@@ -72,18 +95,17 @@ export async function fetchNaverSection(
 
       const press = $(el).find('.sa_text_press').text().trim() || '네이버뉴스'
 
-      // 날짜: 여러 셀렉터 순서대로 시도 (datetime 속성 → 텍스트 순)
+      // 날짜: sa_text_datetime에서 추출 ("9분전", "1시간전" 등)
       const dateText =
+        $(el).find('.sa_text_datetime').first().text().trim() ||
         $(el).find('[data-published-time]').attr('data-published-time') ||
         $(el).find('[datetime]').attr('datetime') ||
-        $(el).find('.sa_text_datetime_bullet, .sa_date, .date, .info_date, .article_date, time').first().text().trim() ||
         ''
 
       const summary = cleanSummary($(el).find('.sa_text_lede, .sa_desc, .lede').text())
+      const hasDate = dateText.trim().length > 0
 
-      const publishedAt = toIso(dateText || undefined)
-      if (items.length === 0) console.log(`[Naver:${category}] dateText 샘플="${dateText}" → ${publishedAt}`)
-
+      const idx = items.length
       items.push({
         id: stableId(link, 'n'),
         title,
@@ -92,11 +114,28 @@ export async function fetchNaverSection(
         source: 'naver',
         sourceName: press,
         category: guessCategory(title) ?? category,
-        publishedAt,
+        publishedAt: hasDate ? toIso(dateText) : new Date().toISOString(),
         collectedAt: new Date().toISOString(),
         thumbnail: imgSrc?.startsWith('http') ? imgSrc : undefined,
       })
+
+      // 날짜 없는 기사는 개별 페이지에서 날짜 보완 대기
+      if (!hasDate) noDateIndices.push(idx)
     })
+
+    // 날짜 없는 기사: 개별 페이지에서 병렬 보완 (최대 8개)
+    if (noDateIndices.length > 0) {
+      const targets = noDateIndices.slice(0, 8)
+      const results = await Promise.allSettled(
+        targets.map(i => fetchNaverArticleDate(items[i].url))
+      )
+      results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value) {
+          items[targets[i]].publishedAt = r.value
+        }
+      })
+      console.log(`[Naver:${category}] 날짜 보완 ${targets.length}건 → 성공 ${results.filter(r => r.status === 'fulfilled' && r.value).length}건`)
+    }
 
     logCrawl({
       source: 'naver',

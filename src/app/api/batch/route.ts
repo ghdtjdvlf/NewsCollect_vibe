@@ -70,7 +70,10 @@ export async function POST(req: NextRequest) {
     console.log(`[batch] 완료 articles=${uniqueItems.length} elapsed=${elapsed}ms`)
 
     // 수집 완료 후 요약 배치 트리거 (fire-and-forget)
-    const siteUrl = process.env.URL ?? process.env.NEXT_PUBLIC_BASE_URL
+    // req.url에서 origin 추출 → 로컬/프로덕션 자동 감지
+    const siteUrl = (() => {
+      try { return new URL(req.url).origin } catch { return null }
+    })() ?? process.env.URL ?? process.env.NEXT_PUBLIC_BASE_URL
     if (siteUrl) {
       fetch(`${siteUrl}/api/summarize-batch`, {
         method: 'POST',
