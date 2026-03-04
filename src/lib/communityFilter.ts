@@ -16,41 +16,43 @@ function matchScore(newsTitle: string, communityPosts: CommunityPost[]): {
   matches: CommunityPost[]
 } {
   const normalizedNews = newsTitle.replace(/[^\w가-힣\s]/g, ' ').toLowerCase()
-  // 뉴스 제목에서도 키워드 추출 (양방향)
   const newsKeywords = extractKeywords(normalizedNews)
 
   let score = 0
   const matches: CommunityPost[] = []
 
   for (const post of communityPosts) {
-    let postScore = 0
     const normalizedPost = post.postTitle.replace(/[^\w가-힣\s]/g, ' ').toLowerCase()
+    const dir1: string[] = []
+    const dir2: string[] = []
 
-    // 방향 1: 커뮤니티 키워드 → 뉴스 제목에 포함되는지
+    // 방향 1: 커뮤니티 키워드 → 뉴스 제목에 포함
+    // 2글자 단일어는 단방향 매칭에서 제외 (오탐 방지)
     for (const kw of post.keywords) {
-      if (kw.length >= 2 && normalizedNews.includes(kw.toLowerCase())) {
-        postScore += keywordWeight(kw)
-      }
+      const isShortUnigram = !kw.includes(' ') && kw.length === 2
+      if (isShortUnigram) continue
+      if (normalizedNews.includes(kw.toLowerCase())) dir1.push(kw)
     }
 
-    // 방향 2: 뉴스 키워드 → 커뮤니티 글에 포함되는지
+    // 방향 2: 뉴스 키워드 → 커뮤니티 글에 포함
     for (const kw of newsKeywords) {
-      if (kw.length >= 2 && normalizedPost.includes(kw.toLowerCase())) {
-        postScore += keywordWeight(kw)
-      }
+      const isShortUnigram = !kw.includes(' ') && kw.length === 2
+      if (isShortUnigram) continue
+      if (normalizedPost.includes(kw.toLowerCase())) dir2.push(kw)
     }
+
+    if (dir1.length === 0 && dir2.length === 0) continue
+
+    let postScore =
+      dir1.reduce((s, kw) => s + keywordWeight(kw), 0) +
+      dir2.reduce((s, kw) => s + keywordWeight(kw), 0)
 
     // 양방향 모두 매칭 시 보너스
-    if (postScore > 0) {
-      const bothDirections =
-        post.keywords.some((kw) => normalizedNews.includes(kw.toLowerCase())) &&
-        newsKeywords.some((kw) => normalizedPost.includes(kw.toLowerCase()))
-      if (bothDirections) postScore *= 1.5
+    if (dir1.length > 0 && dir2.length > 0) postScore *= 1.5
 
-      const engagementBonus = Math.log10(Math.max(post.commentCount + 1, 1)) * 0.5
-      score += postScore + engagementBonus
-      matches.push(post)
-    }
+    const engagementBonus = Math.log10(Math.max(post.commentCount + 1, 1)) * 0.5
+    score += postScore + engagementBonus
+    matches.push(post)
   }
 
   return { score, matches }
@@ -60,11 +62,10 @@ function matchScore(newsTitle: string, communityPosts: CommunityPost[]): {
 export function filterTrendingNews(
   newsItems: NewsItem[],
   communityPosts: CommunityPost[],
-  minScore = 1,
+  minScore = 2,
   limit = 20
 ): NewsItem[] {
   if (communityPosts.length === 0) {
-    // 커뮤니티 데이터 없으면 뉴스 그대로 반환
     return newsItems.slice(0, limit)
   }
 
@@ -72,11 +73,22 @@ export function filterTrendingNews(
     .map((item) => {
       const { score, matches } = matchScore(item.title, communityPosts)
 
+      // 소스별 최고 점수 멘션 1개씩만 선택 (같은 커뮤니티 중복 제거)
+      const seenSource = new Set<string>()
+      const topMentions = matches
+        .filter((m) => {
+          if (seenSource.has(m.source)) return false
+          seenSource.add(m.source)
+          return true
+        })
+        .slice(0, 3)
+        .map(toMention)
+
       return {
         item: {
           ...item,
           trendScore: Math.round(score * 10),
-          communityMentions: matches.slice(0, 3).map(toMention),
+          communityMentions: topMentions,
         },
         score,
       }

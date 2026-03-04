@@ -23,11 +23,19 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
   // 아코디언: 현재 펼쳐진 카드 ID
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
-  // Fix: p.items 가 undefined 일 때 flatMap 오류 방지
-  const allItems = useMemo(
-    () => data?.pages.flatMap((p) => (p as NewsResponse).items ?? []) ?? [],
-    [data]
-  )
+  // 페이지 병합 + 중복 제거 (publishedAt 커서 충돌로 같은 기사가 두 페이지에 걸칠 수 있음)
+  const allItems = useMemo(() => {
+    const seen = new Set<string>()
+    return (
+      data?.pages
+        ?.flatMap((p) => (p as NewsResponse).items ?? [])
+        .filter((item) => {
+          if (seen.has(item.id)) return false
+          seen.add(item.id)
+          return true
+        }) ?? []
+    )
+  }, [data])
 
   // 로드된 아이템에서 카테고리 동적 수집 (Fix: 카테고리 태그 동기화)
   const displayCategories = useMemo(() => {
@@ -175,7 +183,15 @@ export function LatestTab({ selectedCategory, onCategoryChange }: LatestTabProps
       )}
 
       {!hasNextPage && allItems.length > 0 && (
-        <p className="text-center text-xs text-gray-300 py-4">모든 뉴스를 불러왔습니다.</p>
+        <div className="flex flex-col items-center gap-2 py-8">
+          <div className="flex gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:0ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-indigo-300 animate-bounce [animation-delay:300ms]" />
+          </div>
+          <p className="text-xs text-gray-400 font-medium">최신 뉴스를 수집 중이에요</p>
+          <p className="text-[10px] text-gray-300">5분마다 새 기사를 가져옵니다</p>
+        </div>
       )}
     </div>
   )

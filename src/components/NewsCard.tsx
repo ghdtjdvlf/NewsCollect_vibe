@@ -79,6 +79,7 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
   const [summaryConclusion, setSummaryConclusion] = useState<string | null>(null)
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryError, setSummaryError] = useState('')
+  const [summaryPending, setSummaryPending] = useState(false)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const summarizeCalledRef = useRef(false)
@@ -95,19 +96,27 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
     else setInternalExpanded((v) => !v)
   }
 
+  // embed summaryLines 유무 (boolean) — React Query 배경 리페치로 늦게 도착해도 감지
+  const hasEmbed = !!item.summaryLines?.length
+
   // 카드 열릴 때 3줄 요약 자동 실행
+  // hasEmbed를 dep에 포함 → summaryLines가 늦게 도착해도 effect 재실행
   useEffect(() => {
     if (!isExpanded) return
-    if (summarizeCalledRef.current) return
-    summarizeCalledRef.current = true
 
-    // 배치에서 미리 embed된 summaryLines가 있으면 API 호출 생략
-    if (item.summaryLines && item.summaryLines.length > 0) {
-      console.log(`${tag} 요약embed✅ ${item.summaryLines.length}줄`)
-      setSummaryLines(item.summaryLines)
+    // embed summaryLines가 있으면 항상 즉시 표시 (ref·pending 상태 무관)
+    if (hasEmbed) {
+      console.log(`${tag} 요약embed✅ ${item.summaryLines!.length}줄`)
+      setSummaryLines(item.summaryLines!)
       setSummaryConclusion(item.conclusion ?? null)
+      setSummaryPending(false)
+      setSummaryLoading(false)
       return
     }
+
+    // 이미 API 요청했으면 재요청 안함
+    if (summarizeCalledRef.current) return
+    summarizeCalledRef.current = true
 
     setSummaryLoading(true)
     setSummaryError('')
@@ -116,24 +125,49 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
     fetch('/api/summarize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: item.id }),
+      body: JSON.stringify({ id: item.id, title: item.title, summary: item.summary }),
+      signal: AbortSignal.timeout(32_000),
     })
-      .then((r) => r.json())
-      .then((data: { lines?: string[]; conclusion?: string; error?: string }) => {
+      .then((res) => {
+        if (res.status === 404) {
+          // 아직 요약이 준비되지 않은 경우 (배치 미실행 등) — 재시도 안내
+          console.log(`${tag} 요약준비중`)
+          setSummaryPending(true)
+          return null
+        }
+        if (!res.ok) {
+          console.log(`${tag} 요약오류 status=${res.status}`)
+          setSummaryError('요약을 불러오지 못했습니다.')
+          return null
+        }
+        return res.json() as Promise<{ lines?: string[]; conclusion?: string; error?: string }>
+      })
+      .then((data) => {
+        if (!data) return
         if (data.lines && data.lines.length > 0) {
           console.log(`${tag} 요약완료 ${data.lines.length}줄`)
           setSummaryLines(data.lines)
           setSummaryConclusion(data.conclusion ?? null)
         } else {
-          console.log(`${tag} 요약없음`)
+          // lines가 없으면 서버 에러 메시지 표시 (스피너 없이)
+          console.log(`${tag} 요약실패: ${data.error ?? 'lines 없음'}`)
+          setSummaryError(data.error ?? '요약을 생성하지 못했습니다.')
         }
       })
-      .catch(() => {
-        console.log(`${tag} 요약오류`)
-        setSummaryError('네트워크 오류가 발생했습니다.')
+      .catch((err: unknown) => {
+        const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+        console.log(`${tag} ${isTimeout ? '요약타임아웃' : '요약오류'}`)
+        setSummaryError(isTimeout ? '요약 요청이 시간 초과됐습니다. 다시 눌러봐요.' : '네트워크 오류가 발생했습니다.')
       })
       .finally(() => setSummaryLoading(false))
-  }, [isExpanded]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isExpanded, hasEmbed]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 카드 닫힐 때 pending 상태면 ref 초기화 → 다음 열기 시 재시도
+  useEffect(() => {
+    if (!isExpanded && summaryPending) {
+      summarizeCalledRef.current = false
+    }
+  }, [isExpanded, summaryPending])
 
   // 열린 카드가 뷰포트에서 완전히 사라지면 자동 닫힘
   useEffect(() => {
@@ -401,6 +435,12 @@ export function NewsCard({ item, className, expandedId, onExpand, viewMode = 'li
                   <p className="text-xs text-indigo-400 flex items-center gap-1.5">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     야무지게 요약 중이에요...
+                  </p>
+                )}
+                {summaryPending && !summaryLoading && !summaryLines && (
+                  <p className="text-xs text-gray-400 flex items-center gap-1.5">
+                    <Clock className="w-3 h-3 shrink-0" />
+                    요약 준비 중이에요, 잠시 후 다시 눌러봐요
                   </p>
                 )}
                 {summaryError && !summaryLoading && (

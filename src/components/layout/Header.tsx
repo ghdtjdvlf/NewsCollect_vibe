@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, useScroll, useTransform } from 'framer-motion'
-import { RefreshCw, Zap, Timer } from 'lucide-react'
+import { RefreshCw, Zap, Timer, RotateCcw } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { useUIStore } from '@/stores/uiStore'
 import { cn } from '@/lib/cn'
@@ -35,23 +35,29 @@ export function Header() {
     return () => clearInterval(id)
   }, [])
 
-  async function handleBatch() {
+  async function runBatch(reset = false) {
     setBatchLoading(true)
     setBatchMsg('')
     try {
-      const res = await fetch('/api/batch', {
+      const res = await fetch('/api/batch-run', {
         method: 'POST',
-        headers: { 'x-cron-secret': 'ddakseJul_cron_2024' },
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset }),
+        signal: AbortSignal.timeout(290_000),
       })
       const data = await res.json()
       setBatchMsg(data.message ?? data.error ?? '완료')
-    } catch {
-      setBatchMsg('실패')
+    } catch (err) {
+      const isTimeout = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+      setBatchMsg(isTimeout ? '시간 초과' : '실패')
     } finally {
       setBatchLoading(false)
       setTimeout(() => setBatchMsg(''), 4000)
     }
   }
+
+  function handleBatch() { runBatch(false) }
+  function handleReset() { runBatch(true) }
 
   return (
     <motion.header
@@ -81,6 +87,21 @@ export function Header() {
               <span>{formatCountdown(countdown)}</span>
             </div>
           )}
+
+          {/* 캐시 초기화 + 재배치 */}
+          <button
+            onClick={handleReset}
+            disabled={batchLoading}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1.5 rounded-full text-xs font-medium transition-all',
+              batchLoading
+                ? 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                : 'bg-rose-50 text-rose-400 active:scale-95'
+            )}
+            title="쿨다운 초기화 후 즉시 배치 실행"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
 
           {/* 배치 수동 실행 버튼 */}
           <button
