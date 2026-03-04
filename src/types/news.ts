@@ -73,6 +73,14 @@ export interface TrendingResponse {
   updatedAt: string
 }
 
+// /api/trending 페이지네이션 응답 (클라이언트 전용)
+export interface TrendingPageResponse {
+  items: NewsItem[]
+  hasMore: boolean
+  nextOffset: number | null
+  updatedAt: string
+}
+
 export interface SearchResponse {
   clusters: NewsCluster[]
   total: number

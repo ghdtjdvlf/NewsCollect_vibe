@@ -173,7 +173,7 @@ export async function fetchClienBest(limit = 30): Promise<CommunityPost[]> {
   const start = Date.now()
 
   try {
-    const html = await fetchWithRetry('https://www.clien.net/service/board/cm_allmovie?sort=popular&po=0', {
+    const html = await fetchWithRetry('https://www.clien.net/service/board/cm_now?sort=popular&po=0', {
       timeout: 8000,
       headers: { Referer: 'https://www.clien.net/' },
     })
@@ -277,6 +277,14 @@ const STOP_WORDS = new Set([
   // 인터넷 슬랭
   'ㄷㄷ', 'ㅋㅋ', 'ㄴㄴ', 'ㅠㅠ', 'ㅎㅎ', 'ㄱㄱ', '진짜', '정말', '완전',
   '레전드', '개웃김', '헐', '대박', '실화', '팩트', '인정', '동의',
+  // 뉴스 노이즈: 기사 제목에 자주 등장하지만 매칭에 무의미한 단어
+  '속보', '단독', '기자', '보도', '따르면', '전했다', '밝혔다', '말했다',
+  '전했습니다', '밝혔습니다', '말했습니다', '설명했다', '주장했다',
+  '예정', '가운데', '향후', '이후', '지난', '지난해', '올해', '내년',
+  '오전', '오후', '해당', '관계자', '이에', '이를', '이와', '이날',
+  '다만', '결국', '한편', '이어', '앞서', '특히', '또한', '다시',
+  // 커뮤니티 노이즈
+  '펌글', '펌', '출처', '원본', '번역', '요약', '짤', '움짤', '추천',
 ])
 
 // ─── 키워드 추출 (단어 + 바이그램) ──────────────────────
@@ -286,11 +294,13 @@ export function extractKeywords(title: string): string[] {
     .split(/\s+/)
     .filter((w) => w.length >= 2 && !STOP_WORDS.has(w) && !/^\d+$/.test(w))
 
-  // 바이그램: 인접한 두 단어 조합 (복합 고유명사 포함)
+  // 바이그램: 두 단어 중 하나 이상이 3글자 이상일 때만 생성 (2글자+2글자 노이즈 방지)
   const bigrams: string[] = []
   for (let i = 0; i < words.length - 1; i++) {
-    bigrams.push(`${words[i]} ${words[i + 1]}`)
+    if (words[i].length >= 3 || words[i + 1].length >= 3) {
+      bigrams.push(`${words[i]} ${words[i + 1]}`)
+    }
   }
 
-  return [...new Set([...words, ...bigrams])].slice(0, 14)
+  return [...new Set([...words, ...bigrams])].slice(0, 20)
 }

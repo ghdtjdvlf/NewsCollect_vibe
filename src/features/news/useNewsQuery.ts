@@ -1,16 +1,19 @@
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { newsApi } from '@/lib/api'
 import { useUIStore } from '@/stores/uiStore'
-import type { FetchNewsParams, SearchParams } from '@/types/news'
+import type { FetchNewsParams, SearchParams, TrendingPageResponse } from '@/types/news'
 
 const REFETCH_INTERVAL = 60 * 1000 // 60초
 
-// ─── 화제뉴스 ─────────────────────────────────────────────
+// ─── 화제뉴스 (무한 스크롤) ──────────────────────────────
 export function useTrendingNews() {
   const autoRefresh = useUIStore((s) => s.autoRefresh)
-  return useQuery({
-    queryKey: ['trending'],
-    queryFn: newsApi.getTrending,
+  return useInfiniteQuery({
+    queryKey: ['trending-inf'],
+    queryFn: ({ pageParam }) => newsApi.getTrending(pageParam as number),
+    getNextPageParam: (lastPage: TrendingPageResponse) =>
+      lastPage.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
+    initialPageParam: 0 as number,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchInterval: autoRefresh ? REFETCH_INTERVAL : false,

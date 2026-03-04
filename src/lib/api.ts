@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type {
   NewsResponse,
-  TrendingResponse,
+  TrendingPageResponse,
   SearchResponse,
   FetchNewsParams,
   SearchParams,
@@ -13,8 +13,10 @@ const client = axios.create({
 })
 
 export const newsApi = {
-  getTrending: async (): Promise<TrendingResponse> => {
-    const { data } = await client.get<TrendingResponse>('/trending')
+  getTrending: async (offset = 0): Promise<TrendingPageResponse> => {
+    const { data } = await client.get<TrendingPageResponse>('/trending', {
+      params: { offset },
+    })
     return data
   },
 
