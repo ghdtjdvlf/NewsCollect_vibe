@@ -2,7 +2,7 @@ import { db } from '@/lib/firebase'
 import { OrchestratorAgent } from '@/lib/agents/orchestrator'
 import { setBatchRunning } from '@/lib/agents/agentLogger'
 
-const BATCH_COOLDOWN_MS = 3 * 60 * 1000
+const DEFAULT_COOLDOWN_MS = 10 * 60 * 1000
 
 export interface BatchResult {
   message: string
@@ -19,14 +19,19 @@ export interface BatchResult {
 export async function runBatch(options: { reset?: boolean } = {}): Promise<BatchResult> {
   const forceReset = options.reset === true
 
-  // 쿨다운 체크
+  // 쿨다운 체크 (intervalMinutes는 agentLogs에서 읽음)
   try {
-    const metaDoc = await db.collection('meta').doc('batch').get()
+    const [metaDoc, logsDoc] = await Promise.all([
+      db.collection('meta').doc('batch').get(),
+      db.collection('meta').doc('agentLogs').get(),
+    ])
+    const intervalMinutes: number = (logsDoc.data()?.batchState?.intervalMinutes as number) ?? 10
+    const cooldownMs = intervalMinutes * 60 * 1000
     const lastRun: number = metaDoc.exists ? (metaDoc.data()?.lastRunAt ?? 0) : 0
     const elapsed = Date.now() - lastRun
-    if (!forceReset && elapsed < BATCH_COOLDOWN_MS) {
-      const waitSec = Math.ceil((BATCH_COOLDOWN_MS - elapsed) / 1000)
-      console.log(`[batch] 쿨다운 중 — ${waitSec}초 후 재실행`)
+    if (!forceReset && elapsed < cooldownMs) {
+      const waitSec = Math.ceil((cooldownMs - elapsed) / 1000)
+      console.log(`[batch] 쿨다운 중 — ${waitSec}초 후 재실행 (주기: ${intervalMinutes}분)`)
       return { message: `쿨다운 중 (${waitSec}초 후 재실행)`, total: 0 }
     }
     await db.collection('meta').doc('batch').set({ lastRunAt: Date.now() })

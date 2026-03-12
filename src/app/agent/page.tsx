@@ -140,9 +140,24 @@ function GroqUsageCard({ usage }: { usage: GroqRateLimit | null }) {
 }
 
 // ─── 배치 스케줄 카드 ─────────────────────────────────────
-function BatchScheduleCard({ schedule }: { schedule: BatchSchedule | null }) {
+function BatchScheduleCard({ schedule, onIntervalChange }: { schedule: BatchSchedule | null; onIntervalChange: () => void }) {
   const intervalMinutes = schedule?.intervalMinutes ?? 10
   const { display, progress } = useCountdown(schedule?.nextRunAt ?? null, intervalMinutes)
+  const [inputVal, setInputVal] = useState(String(intervalMinutes))
+  const [saving, setSaving] = useState(false)
+
+  const saveInterval = async () => {
+    const val = parseInt(inputVal)
+    if (isNaN(val) || val < 5 || val > 120) return
+    setSaving(true)
+    await fetch('/api/agent/interval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalMinutes: val }),
+    })
+    setSaving(false)
+    onIntervalChange()
+  }
 
   if (!schedule) return null
 
@@ -161,8 +176,24 @@ function BatchScheduleCard({ schedule }: { schedule: BatchSchedule | null }) {
 
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400 mb-0.5">주기</p>
-          <p className="font-semibold text-gray-800">{schedule.intervalMinutes}분마다</p>
+          <p className="text-xs text-gray-400 mb-1.5">수집 주기</p>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={5} max={120}
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              className="w-14 text-sm font-semibold text-gray-800 bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-center"
+            />
+            <span className="text-xs text-gray-400">분</span>
+            <button
+              onClick={saveInterval}
+              disabled={saving}
+              className="ml-auto text-[10px] px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50"
+            >
+              {saving ? '저장 중' : '저장'}
+            </button>
+          </div>
         </div>
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-xs text-gray-400 mb-0.5">마지막 실행</p>
@@ -410,7 +441,7 @@ export default function AgentDashboard() {
         <GroqUsageCard usage={groqUsage} />
 
         {/* 배치 스케줄 */}
-        <BatchScheduleCard schedule={schedule} />
+        <BatchScheduleCard schedule={schedule} onIntervalChange={fetchLogs} />
 
         {/* 에이전트 요약 */}
         <div className="grid grid-cols-3 gap-3">
