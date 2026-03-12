@@ -7,7 +7,7 @@ setGlobalOptions({ region: 'asia-northeast3' })
 
 export const batchCron = onSchedule(
   {
-    schedule: 'every 5 minutes',
+    schedule: 'every 10 minutes',
     timeoutSeconds: 540,   // 9분 (Firebase Functions v2 최대 9분)
     memory: '512MiB',
   },

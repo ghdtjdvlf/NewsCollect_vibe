@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { stableId, toIso, guessCategory, cleanSummary } from './utils'
+import { stableId, toIso, guessCategory, cleanSummary, fetchArticlePublishedTime } from './utils'
 
 // 다음 뉴스 섹션 경로
 const DAUM_SECTION: Partial<Record<NewsCategory, string>> = {
@@ -99,11 +99,23 @@ export async function fetchDaumSection(
         source: 'daum',
         sourceName: $(el).find('.info_cp, .txt_cp').text().trim() || '다음뉴스',
         category: guessCategory(title) ?? category,
-        publishedAt: dateText ? toIso(dateText) : new Date().toISOString(),
+        publishedAt: dateText ? toIso(dateText) : '',
         collectedAt: new Date().toISOString(),
         thumbnail: imgSrc,
       })
     })
+
+    // 날짜 없는 기사: 개별 페이지에서 병렬 보완
+    const noDateIndices = items.map((item, i) => (!item.publishedAt ? i : -1)).filter(i => i >= 0)
+    if (noDateIndices.length > 0) {
+      const results = await Promise.allSettled(
+        noDateIndices.map(i => fetchArticlePublishedTime(items[i].url))
+      )
+      results.forEach((r, i) => {
+        items[noDateIndices[i]].publishedAt = (r.status === 'fulfilled' && r.value) ? r.value : new Date().toISOString()
+      })
+      console.log(`[Daum:${category}] 날짜 보완 ${noDateIndices.length}건 → 성공 ${results.filter(r => r.status === 'fulfilled' && r.value).length}건`)
+    }
 
     logCrawl({
       source: 'daum',

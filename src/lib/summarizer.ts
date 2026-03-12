@@ -4,7 +4,7 @@ import type { NewsItem } from '@/types/news'
 export type SummaryData = { lines: string[]; conclusion: string }
 
 const GROQ_MODEL = 'llama-3.3-70b-versatile'
-const MAX_PER_CALL = 30
+const MAX_PER_CALL = 20  // 30 → 20으로 줄여 토큰 절약
 
 function buildPrompt(items: NewsItem[]): string {
   return `다음 뉴스들을 각각 3줄(음슴체)로 요약하고 결론을 추가해줘.
@@ -50,36 +50,114 @@ function parseGroqResponse(text: string, items: NewsItem[]): Map<string, Summary
   return resultMap
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+// Rate limit 헤더 저장 (동적 import로 순환 의존 방지)
+async function trySaveRateLimit(response: Response) {
+  try {
+    const h = (key: string) => parseInt(response.headers.get(key) ?? '0', 10)
+    const limitDay = h('x-ratelimit-limit-tokens-day')
+    if (limitDay > 0) {
+      const { setGroqRateLimit } = await import('@/lib/agents/agentLogger')
+      setGroqRateLimit({
+        updatedAt: new Date().toISOString(),
+        limitRequests: h('x-ratelimit-limit-requests'),
+        remainingRequests: h('x-ratelimit-remaining-requests'),
+        limitTokens: h('x-ratelimit-limit-tokens'),
+        remainingTokens: h('x-ratelimit-remaining-tokens'),
+        limitTokensDay: limitDay,
+        remainingTokensDay: h('x-ratelimit-remaining-tokens-day'),
+      })
+    }
+  } catch { /* 무시 */ }
+}
+
+async function callGroqWithRetry(
+  groq: Groq,
+  prompt: string,
+  maxRetries = 3
+): Promise<string> {
+  let delay = 8_000
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // withResponse()로 헤더 캡처, 실패 시 일반 create()로 폴백
+      let text = ''
+      try {
+        const { data: completion, response } = await groq.chat.completions.create({
+          model: GROQ_MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.4,
+          max_tokens: 2048,
+        }).withResponse()
+        text = completion.choices[0]?.message?.content ?? ''
+        trySaveRateLimit(response) // fire-and-forget
+      } catch (innerErr: unknown) {
+        const status = (innerErr as { status?: number })?.status
+        // 429/401/5xx는 재시도 로직에서 처리
+        if (status) throw innerErr
+        // withResponse() 자체가 안되는 경우 폴백
+        console.warn('[summarizer] withResponse 실패, 폴백:', (innerErr as Error)?.message)
+        const completion = await groq.chat.completions.create({
+          model: GROQ_MODEL,
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.4,
+          max_tokens: 2048,
+        })
+        text = completion.choices[0]?.message?.content ?? ''
+      }
+      return text
+    } catch (err: unknown) {
+      const status = (err as { status?: number })?.status
+      if (status === 429 && attempt < maxRetries) {
+        console.warn(`[summarizer] 429 rate limit — ${delay / 1000}초 후 재시도 (${attempt + 1}/${maxRetries})`)
+        await sleep(delay)
+        delay *= 2
+      } else {
+        throw err
+      }
+    }
+  }
+  return ''
+}
+
 /**
- * Groq로 기사 배열을 요약. 30개 단위로 청크 처리.
- * 실패 시 빈 Map 반환 (호출부에서 catch-up cron이 처리)
+ * Groq로 기사 배열을 요약. 20개 단위로 청크 처리.
+ * 429 rate limit 시 최대 3회 지수 백오프 재시도.
  */
 export async function summarizeItems(
   items: NewsItem[],
   apiKey: string,
-  timeoutMs = 60_000
+  timeoutMs = 120_000  // 60s → 120s
 ): Promise<Map<string, SummaryData>> {
   if (items.length === 0) return new Map()
 
+  if (!apiKey) {
+    console.error('[summarizer] GROQ_API_KEY 없음 — 요약 건너뜀')
+    return new Map()
+  }
+
+  console.log(`[summarizer] 시작 — ${items.length}개, timeout=${timeoutMs}ms`)
   const groq = new Groq({ apiKey, timeout: timeoutMs })
   const resultMap = new Map<string, SummaryData>()
 
-  // 30개씩 청크 처리
   for (let i = 0; i < items.length; i += MAX_PER_CALL) {
     const chunk = items.slice(i, i + MAX_PER_CALL)
-    const prompt = buildPrompt(chunk)
+    console.log(`[summarizer] 청크 ${i + 1}~${i + chunk.length} 요약 중...`)
 
-    const completion = await groq.chat.completions.create({
-      model: GROQ_MODEL,
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.4,
-      max_tokens: 2048,
-    })
+    if (i > 0) await sleep(2_000)
 
-    const text = completion.choices[0]?.message?.content ?? ''
-    const chunkResult = parseGroqResponse(text, chunk)
-    chunkResult.forEach((v, k) => resultMap.set(k, v))
+    try {
+      const text = await callGroqWithRetry(groq, buildPrompt(chunk))
+      const chunkResult = parseGroqResponse(text, chunk)
+      console.log(`[summarizer] 청크 결과: ${chunkResult.size}/${chunk.length}개 성공`)
+      chunkResult.forEach((v, k) => resultMap.set(k, v))
+    } catch (err: unknown) {
+      const status = (err as { status?: number })?.status
+      const msg = (err as Error)?.message ?? String(err)
+      console.error(`[summarizer] 청크 ${i}~${i + chunk.length} 실패 status=${status} msg=${msg}`)
+    }
   }
 
+  console.log(`[summarizer] 완료 — ${resultMap.size}/${items.length}개`)
   return resultMap
 }

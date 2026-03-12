@@ -24,8 +24,13 @@ self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
 
-  // API 요청: Network-first → 실패 시 캐시
+  // API 요청: POST는 캐시 불가 → 그냥 네트워크 통과
   if (url.pathname.startsWith('/api/')) {
+    if (request.method !== 'GET') {
+      event.respondWith(fetch(request))
+      return
+    }
+    // GET만 Network-first → 실패 시 캐시
     event.respondWith(
       fetch(request)
         .then((res) => {

@@ -20,33 +20,41 @@ export async function POST(req: NextRequest) {
 
     console.log(`[summarize] 요청 시작 id=${id}`)
 
-    const articlesCol = db.collection('articles')
-    const doc = await articlesCol.doc(id).get()
-
-    // Firestore에 summaryLines가 있으면 즉시 반환
-    if (doc.exists && doc.data()?.summaryLines?.length) {
-      const data = doc.data()!
-      const title = data.title ? ` | "${String(data.title).slice(0, 25)}..."` : ''
-      console.log(`[summarize] 캐시 반환 id=${id}${title} | lines=${data.summaryLines.length}개 (${elapsed()})`)
-      return NextResponse.json({ lines: data.summaryLines, conclusion: data.conclusion })
-    }
-
-    // summaryLines 없음 → Groq 실시간 요약
     const apiKey = process.env.GROQ_API_KEY
     if (!apiKey) {
       return NextResponse.json({ error: 'GROQ_API_KEY 없음' }, { status: 503 })
     }
 
-    // Firestore 데이터 우선, 없으면 클라이언트가 보낸 title/summary 사용
-    let item: NewsItem
-    if (doc.exists) {
-      const { expiresAt: _e, summaryGeneratedAt: _s, ...rest } = doc.data()!
-      item = rest as unknown as NewsItem
-    } else if (clientTitle) {
+    // Firestore 조회 시도 (실패해도 클라이언트 데이터로 폴백)
+    let item: NewsItem | null = null
+    try {
+      const articlesCol = db.collection('articles')
+      const doc = await articlesCol.doc(id).get()
+
+      // Firestore에 summaryLines가 있으면 즉시 반환
+      if (doc.exists && doc.data()?.summaryLines?.length) {
+        const data = doc.data()!
+        const title = data.title ? ` | "${String(data.title).slice(0, 25)}..."` : ''
+        console.log(`[summarize] 캐시 반환 id=${id}${title} | lines=${data.summaryLines.length}개 (${elapsed()})`)
+        return NextResponse.json({ lines: data.summaryLines, conclusion: data.conclusion })
+      }
+
+      if (doc.exists) {
+        const { expiresAt: _e, summaryGeneratedAt: _s, ...rest } = doc.data()!
+        item = rest as unknown as NewsItem
+      }
+    } catch (firestoreErr) {
+      const msg = firestoreErr instanceof Error ? firestoreErr.message : String(firestoreErr)
+      console.warn(`[summarize] Firestore 조회 실패 (폴백) id=${id}: ${msg}`)
+    }
+
+    // Firestore 실패 또는 문서 없음 → 클라이언트 데이터 사용
+    if (!item) {
+      if (!clientTitle) {
+        console.log(`[summarize] 기사 없음 id=${id} (${elapsed()})`)
+        return NextResponse.json({ error: '기사를 찾을 수 없습니다.' }, { status: 404 })
+      }
       item = { id, title: clientTitle, summary: clientSummary } as NewsItem
-    } else {
-      console.log(`[summarize] 기사 없음 id=${id} (${elapsed()})`)
-      return NextResponse.json({ error: '기사를 찾을 수 없습니다.' }, { status: 404 })
     }
 
     const shortTitle = item.title ? `"${item.title.slice(0, 25)}..."` : id
@@ -59,13 +67,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '요약 생성 실패' }, { status: 500 })
     }
 
-    // Firestore에 저장 (다음 요청 시 즉시 반환)
-    if (doc.exists) {
-      await articlesCol.doc(id).update({
-        summaryLines: summary.lines,
-        conclusion: summary.conclusion,
-        summaryGeneratedAt: new Date(),
-      })
+    // Firestore에 저장 (다음 요청 시 즉시 반환, 실패해도 무시)
+    try {
+      const articlesCol = db.collection('articles')
+      const doc = await articlesCol.doc(id).get()
+      if (doc.exists) {
+        await articlesCol.doc(id).update({
+          summaryLines: summary.lines,
+          conclusion: summary.conclusion,
+          summaryGeneratedAt: new Date(),
+        })
+      }
+    } catch {
+      console.warn(`[summarize] Firestore 저장 실패 id=${id} (요약은 정상 반환)`)
     }
 
     console.log(`[summarize] 완료 | ${shortTitle} | lines=${summary.lines.length}개 (${elapsed()})`)

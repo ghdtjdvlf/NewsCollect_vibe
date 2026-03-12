@@ -46,5 +46,5 @@ export default async function batchCron(req: Request): Promise<Response> {
 }
 
 export const config: Config = {
-  schedule: '*/5 * * * *',
+  schedule: '*/10 * * * *',
 }

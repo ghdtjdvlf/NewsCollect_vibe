@@ -2,7 +2,7 @@ import { load } from 'cheerio'
 import { fetchWithRetry } from '@/lib/fetcher'
 import { logCrawl } from '@/lib/crawlLogger'
 import type { NewsItem, NewsCategory } from '@/types/news'
-import { stableId, toIso, guessCategory, cleanSummary } from './utils'
+import { stableId, toIso, guessCategory, cleanSummary, fetchArticlePublishedTime } from './utils'
 
 // 네이버 뉴스 섹션 ID
 const NAVER_SECTION: Record<string, string> = {
@@ -123,18 +123,17 @@ export async function fetchNaverSection(
       if (!hasDate) noDateIndices.push(idx)
     })
 
-    // 날짜 없는 기사: 개별 페이지에서 병렬 보완 (최대 8개)
+    // 날짜 없는 기사: 개별 페이지에서 병렬 보완 (전체)
     if (noDateIndices.length > 0) {
-      const targets = noDateIndices.slice(0, 8)
       const results = await Promise.allSettled(
-        targets.map(i => fetchNaverArticleDate(items[i].url))
+        noDateIndices.map(i => fetchArticlePublishedTime(items[i].url))
       )
       results.forEach((r, i) => {
         if (r.status === 'fulfilled' && r.value) {
-          items[targets[i]].publishedAt = r.value
+          items[noDateIndices[i]].publishedAt = r.value
         }
       })
-      console.log(`[Naver:${category}] 날짜 보완 ${targets.length}건 → 성공 ${results.filter(r => r.status === 'fulfilled' && r.value).length}건`)
+      console.log(`[Naver:${category}] 날짜 보완 ${noDateIndices.length}건 → 성공 ${results.filter(r => r.status === 'fulfilled' && r.value).length}건`)
     }
 
     logCrawl({
