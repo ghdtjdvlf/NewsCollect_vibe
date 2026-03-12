@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { RefreshCw, Trash2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Zap, Timer, Activity, Play, RotateCcw } from 'lucide-react'
+import { RefreshCw, Trash2, CheckCircle, XCircle, Clock, ChevronDown, ChevronUp, Zap, Timer, Activity, Play, RotateCcw, Filter } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import type { AgentRunLog, BatchSchedule, GroqRateLimit } from '@/lib/agents/agentLogger'
 
@@ -75,16 +75,47 @@ function useCountdown(targetIso: string | null, intervalMinutes: number) {
 }
 
 // ─── Groq API 한도 카드 ───────────────────────────────────
-function GroqUsageCard({ usage }: { usage: GroqRateLimit | null }) {
-  if (!usage) return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <Zap className="w-4 h-4 text-orange-400" />
-        <span className="font-semibold text-sm text-gray-800">Groq API 한도</span>
-      </div>
-      <p className="text-xs text-gray-400">요약 실행 후 표시됩니다</p>
-    </div>
-  )
+// "6s" / "1m30s" → ms
+function parseDurationMs(raw: string): number {
+  const m = raw.match(/(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?/)
+  if (!m) return 0
+  return (parseInt(m[1] ?? '0') * 60 + parseFloat(m[2] ?? '0')) * 1000
+}
+
+// 남은 시간(ms) → 표시 문자열
+function fmtRemaining(ms: number): string {
+  if (ms <= 0) return '초기화됨'
+  const totalSec = Math.ceil(ms / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const min = Math.floor((totalSec % 3600) / 60)
+  const sec = totalSec % 60
+  if (h > 0) return `${h}시간 ${min}분 후 초기화`
+  if (min > 0 && sec > 0) return `${min}분 ${sec}초 후 초기화`
+  if (min > 0) return `${min}분 후 초기화`
+  return `${sec}초 후 초기화`
+}
+
+// 절대 타임스탬프까지 카운트다운하는 훅
+function useCountdownTo(targetMs: number): string {
+  const [display, setDisplay] = useState(() => fmtRemaining(targetMs - Date.now()))
+  useEffect(() => {
+    const tick = () => setDisplay(fmtRemaining(targetMs - Date.now()))
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [targetMs])
+  return display
+}
+
+function GroqUsageCardInner({ usage }: { usage: GroqRateLimit }) {
+  const updatedMs = new Date(usage.updatedAt).getTime()
+  const tpmResetMs = usage.resetTokens ? updatedMs + parseDurationMs(usage.resetTokens) : 0
+  const rpmResetMs = usage.resetRequests ? updatedMs + parseDurationMs(usage.resetRequests) : 0
+  const dayResetMs = usage.resetTokensDay ? new Date(usage.resetTokensDay).getTime() : 0
+
+  const tpmTimer = useCountdownTo(tpmResetMs)
+  const rpmTimer = useCountdownTo(rpmResetMs)
+  const dayTimer = useCountdownTo(dayResetMs)
 
   const dayPct = usage.limitTokensDay > 0
     ? Math.round((1 - usage.remainingTokensDay / usage.limitTokensDay) * 100)
@@ -115,7 +146,10 @@ function GroqUsageCard({ usage }: { usage: GroqRateLimit | null }) {
         <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
           <div className={cn('h-full rounded-full transition-all', dayColor)} style={{ width: `${dayPct}%` }} />
         </div>
-        <p className="text-[10px] text-gray-400 text-right">{dayPct}% 사용</p>
+        <div className="flex justify-between text-[10px]">
+          <span className="text-amber-500 font-medium">{dayResetMs > 0 ? dayTimer : ''}</span>
+          <span className="text-gray-400">{dayPct}% 사용</span>
+        </div>
       </div>
 
       {/* 분당 토큰 */}
@@ -129,20 +163,112 @@ function GroqUsageCard({ usage }: { usage: GroqRateLimit | null }) {
         <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
           <div className={cn('h-full rounded-full transition-all', minColor)} style={{ width: `${minPct}%` }} />
         </div>
+        {tpmResetMs > 0 && (
+          <p className="text-[10px] text-indigo-400 font-medium">{tpmTimer}</p>
+        )}
       </div>
 
       {/* 분당 요청 수 */}
-      <div className="flex gap-3 text-xs text-gray-500">
+      <div className="flex items-center gap-3 text-xs text-gray-500">
         <span>분당 요청: <b className="text-gray-800">{usage.remainingRequests}</b> / {usage.limitRequests} 남음</span>
+        {rpmResetMs > 0 && (
+          <span className="text-indigo-400 font-medium ml-auto">{rpmTimer}</span>
+        )}
       </div>
     </div>
   )
 }
 
+function GroqUsageCard({ usage }: { usage: GroqRateLimit | null }) {
+  if (!usage) return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <Zap className="w-4 h-4 text-orange-400" />
+        <span className="font-semibold text-sm text-gray-800">Groq API 한도</span>
+      </div>
+      <p className="text-xs text-gray-400">요약 실행 후 표시됩니다</p>
+    </div>
+  )
+  return <GroqUsageCardInner usage={usage} />
+}
+
+// ─── 요약 현황 카드 ──────────────────────────────────────
+// 기사 20개당 Groq 1회 호출, 호출당 ~10초 + 청크 간 2초 딜레이
+const TOKENS_PER_ARTICLE = 200   // 실측 기준 평균
+const SEC_PER_CHUNK = 12         // 20개 청크 처리 평균 소요 시간
+const CHUNK_SIZE = 20
+
+function SummaryStatsCard({ stats }: { stats: { total: number; unsummarized: number } | null }) {
+  if (!stats) return null
+
+  const { total, unsummarized } = stats
+  const summarized = total - unsummarized
+  const pct = total > 0 ? Math.round((summarized / total) * 100) : 100
+  const chunks = Math.ceil(unsummarized / CHUNK_SIZE)
+  const estSec = chunks * SEC_PER_CHUNK
+  const estTokens = unsummarized * TOKENS_PER_ARTICLE
+
+  const estTime = estSec <= 0 ? '없음' :
+    estSec < 60 ? `약 ${estSec}초` :
+    `약 ${Math.ceil(estSec / 60)}분`
+
+  const barColor = pct >= 90 ? 'bg-emerald-500' : pct >= 50 ? 'bg-indigo-500' : 'bg-amber-400'
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <Activity className="w-4 h-4 text-violet-500" />
+        <span className="font-semibold text-sm text-gray-800">요약 현황</span>
+        <span className="ml-auto text-xs font-bold text-gray-700">{summarized.toLocaleString()} / {total.toLocaleString()}개</span>
+      </div>
+
+      <div className="space-y-1">
+        <div className="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+          <div className={cn('h-full rounded-full transition-all duration-500', barColor)} style={{ width: `${pct}%` }} />
+        </div>
+        <div className="flex justify-between text-[11px] text-gray-400">
+          <span>요약 완료 <b className="text-gray-700">{pct}%</b></span>
+          <span>미요약 <b className="text-amber-500">{unsummarized.toLocaleString()}개</b></span>
+        </div>
+      </div>
+
+      {unsummarized > 0 && (
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="bg-gray-50 rounded-xl p-2.5 text-center">
+            <p className="text-[10px] text-gray-400 mb-0.5">예상 소요 시간</p>
+            <p className="text-sm font-bold text-gray-800">{estTime}</p>
+            <p className="text-[10px] text-gray-400">{chunks}회 API 호출</p>
+          </div>
+          <div className="bg-gray-50 rounded-xl p-2.5 text-center">
+            <p className="text-[10px] text-gray-400 mb-0.5">예상 토큰 사용</p>
+            <p className="text-sm font-bold text-gray-800">{estTokens.toLocaleString()}</p>
+            <p className="text-[10px] text-gray-400">기사당 ~{TOKENS_PER_ARTICLE}토큰</p>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── 배치 스케줄 카드 ─────────────────────────────────────
-function BatchScheduleCard({ schedule }: { schedule: BatchSchedule | null }) {
+function BatchScheduleCard({ schedule, onIntervalChange }: { schedule: BatchSchedule | null; onIntervalChange: () => void }) {
   const intervalMinutes = schedule?.intervalMinutes ?? 10
   const { display, progress } = useCountdown(schedule?.nextRunAt ?? null, intervalMinutes)
+  const [inputVal, setInputVal] = useState(String(intervalMinutes))
+  const [saving, setSaving] = useState(false)
+
+  const saveInterval = async () => {
+    const val = parseInt(inputVal)
+    if (isNaN(val) || val < 5 || val > 120) return
+    setSaving(true)
+    await fetch('/api/agent/interval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ intervalMinutes: val }),
+    })
+    setSaving(false)
+    onIntervalChange()
+  }
 
   if (!schedule) return null
 
@@ -161,8 +287,24 @@ function BatchScheduleCard({ schedule }: { schedule: BatchSchedule | null }) {
 
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div className="bg-gray-50 rounded-xl p-3">
-          <p className="text-xs text-gray-400 mb-0.5">주기</p>
-          <p className="font-semibold text-gray-800">{schedule.intervalMinutes}분마다</p>
+          <p className="text-xs text-gray-400 mb-1.5">수집 주기</p>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={5} max={120}
+              value={inputVal}
+              onChange={e => setInputVal(e.target.value)}
+              className="w-14 text-sm font-semibold text-gray-800 bg-white border border-gray-200 rounded-lg px-2 py-0.5 text-center"
+            />
+            <span className="text-xs text-gray-400">분</span>
+            <button
+              onClick={saveInterval}
+              disabled={saving}
+              className="ml-auto text-[10px] px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 disabled:opacity-50"
+            >
+              {saving ? '저장 중' : '저장'}
+            </button>
+          </div>
         </div>
         <div className="bg-gray-50 rounded-xl p-3">
           <p className="text-xs text-gray-400 mb-0.5">마지막 실행</p>
@@ -214,7 +356,9 @@ function LogDetail({ log }: { log: AgentRunLog }) {
       return `${(o as { totalBefore?: number }).totalBefore ?? '?'}개 → ${(o as { totalAfter?: number }).totalAfter ?? '?'}개`
     }
     if (log.agentName === 'SummarizerAgent') {
-      return `${(o as { succeeded?: number }).succeeded ?? 0}개 요약 완료, ${(o as { failed?: number }).failed ?? 0}개 실패`
+      const s = o as { succeeded?: number; failed?: number; tokensUsed?: number }
+      const tokens = s.tokensUsed ? ` · ${s.tokensUsed.toLocaleString()} 토큰` : ''
+      return `${s.succeeded ?? 0}개 요약 완료, ${s.failed ?? 0}개 실패${tokens}`
     }
     return JSON.stringify(o).slice(0, 80)
   }
@@ -291,19 +435,23 @@ export default function AgentDashboard() {
   const [logs, setLogs] = useState<AgentRunLog[]>([])
   const [schedule, setSchedule] = useState<BatchSchedule | null>(null)
   const [groqUsage, setGroqUsage] = useState<GroqRateLimit | null>(null)
+  const [articleStats, setArticleStats] = useState<{ total: number; unsummarized: number } | null>(null)
   const [loading, setLoading] = useState(false)
   const [running, setRunning] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
+  const [cleaning, setCleaning] = useState(false)
+  const [cleanResult, setCleanResult] = useState<{ deleted: number; remaining: number } | null>(null)
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const fetchLogs = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/agent-logs')
-      const data = await res.json() as { logs: AgentRunLog[]; schedule: BatchSchedule; groqRateLimit: GroqRateLimit | null }
+      const data = await res.json() as { logs: AgentRunLog[]; schedule: BatchSchedule; groqRateLimit: GroqRateLimit | null; articleStats: { total: number; unsummarized: number } }
       setLogs(data.logs)
       setSchedule(data.schedule)
       setGroqUsage(data.groqRateLimit)
+      setArticleStats(data.articleStats ?? null)
     } finally {
       setLoading(false)
     }
@@ -339,10 +487,23 @@ export default function AgentDashboard() {
     setLogs([])
   }
 
+  const runCleanup = async () => {
+    if (!confirm('Firestore 중복 기사를 정리합니다. 계속할까요?')) return
+    setCleaning(true)
+    setCleanResult(null)
+    try {
+      const res = await fetch('/api/agent/cleanup', { method: 'POST' })
+      const data = await res.json() as { deleted: number; remaining: number }
+      setCleanResult(data)
+    } finally {
+      setCleaning(false)
+    }
+  }
+
   useEffect(() => {
     fetchLogs()
     // 실행 중이면 5초마다 자동 새로고침
-    intervalRef.current = setInterval(fetchLogs, 5000)
+    intervalRef.current = setInterval(fetchLogs, 30_000)
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [fetchLogs])
 
@@ -390,6 +551,14 @@ export default function AgentDashboard() {
               </button>
             )}
             <button
+              onClick={runCleanup}
+              disabled={cleaning || running || summarizing || schedule?.isRunning}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Filter className={cn('w-3.5 h-3.5', cleaning && 'animate-pulse')} />
+              {cleaning ? '정리 중...' : '중복 정리'}
+            </button>
+            <button
               onClick={fetchLogs}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-gray-200 text-xs text-gray-600 hover:bg-gray-50"
             >
@@ -406,11 +575,24 @@ export default function AgentDashboard() {
           </div>
         </div>
 
+        {/* 중복 정리 결과 */}
+        {cleanResult && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 flex items-center justify-between text-sm">
+            <span className="text-emerald-700">
+              중복 정리 완료 — <b>{cleanResult.deleted}개</b> 삭제, <b>{cleanResult.remaining}개</b> 남음
+            </span>
+            <button onClick={() => setCleanResult(null)} className="text-emerald-400 hover:text-emerald-600 text-xs">✕</button>
+          </div>
+        )}
+
+        {/* 요약 현황 */}
+        <SummaryStatsCard stats={articleStats} />
+
         {/* Groq API 한도 */}
         <GroqUsageCard usage={groqUsage} />
 
         {/* 배치 스케줄 */}
-        <BatchScheduleCard schedule={schedule} />
+        <BatchScheduleCard schedule={schedule} onIntervalChange={fetchLogs} />
 
         {/* 에이전트 요약 */}
         <div className="grid grid-cols-3 gap-3">

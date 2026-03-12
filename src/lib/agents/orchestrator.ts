@@ -1,16 +1,14 @@
-// ─── OrchestratorAgent: 전체 파이프라인 조율 ─────────────
+// ─── OrchestratorAgent: 수집 파이프라인 조율 ─────────────
+// 역할: 크롤 → 기존 DB 교차 중복 제거 → Firestore 저장 (요약 제외)
+// 요약은 /api/agent/summarize 에서 별도 처리
 import { CrawlerAgent } from './crawlerAgent'
 import { FilterAgent } from './filterAgent'
-import { SummarizerAgent } from './summarizerAgent'
 import { db } from '@/lib/firebase'
 import type { NewsItem, NewsCategory } from '@/types/news'
 
 export interface OrchestratorInput {
   mode: 'trending' | 'latest'
   category?: NewsCategory
-  apiKey?: string
-  limit?: number
-  skipSummary?: boolean
 }
 
 export interface OrchestratorOutput {
@@ -27,67 +25,61 @@ export interface OrchestratorOutput {
 export class OrchestratorAgent {
   private crawler = new CrawlerAgent()
   private filter = new FilterAgent()
-  private summarizer = new SummarizerAgent()
 
   async run(input: OrchestratorInput): Promise<OrchestratorOutput> {
     const start = Date.now()
-    const { mode, category, apiKey, limit = 20, skipSummary = false } = input
+    const { mode, category } = input
 
     console.log(`[Orchestrator] 시작 mode=${mode}`)
 
-    // ① 수집
-    const crawlResult = await this.crawler.run({ mode, limit })
+    // ① 수집 (소스별 제한 없이 전체)
+    const crawlResult = await this.crawler.run({ mode })
     if (!crawlResult.success) {
       console.warn('[Orchestrator] 크롤링 실패 — 빈 결과 반환')
       return this.emptyResult(start)
     }
     const { newsItems, communityPosts } = crawlResult.data
 
-    // ② 필터링
+    // ② Firestore 기존 기사 제목 로드 (교차 중복 제거용)
+    const existingTitles = await this.fetchExistingTitles()
+
+    // ③ 필터링 (90% 제목 유사도 중복 제거 + trendScore 계산)
     const filterResult = await this.filter.run({
       newsItems,
       communityPosts,
       mode,
       category,
-      limit,
+      existingTitles,
     })
     if (!filterResult.success) {
-      console.warn('[Orchestrator] 필터링 실패 — 크롤링 원본 반환')
-      return this.toOutput(newsItems.slice(0, limit), newsItems.length, 0, start)
+      console.warn('[Orchestrator] 필터링 실패 — 빈 결과 반환')
+      return this.emptyResult(start)
     }
     const { items } = filterResult.data
 
-    // ③ 요약 (apiKey 있고 skipSummary 아닌 경우)
-    let summarizedCount = 0
-    if (!skipSummary && apiKey && items.length > 0) {
-      const needsSummary = items.filter((item) => !item.summaryLines?.length)
-      console.log(`[Orchestrator] 요약 대상: ${needsSummary.length}개 (전체 ${items.length}개 중 미요약)`)
-      if (needsSummary.length > 0) {
-        const summaryResult = await this.summarizer.run({ items: needsSummary, apiKey })
-        if (summaryResult.success) {
-          const { summaryMap } = summaryResult.data
-          summarizedCount = summaryMap.size
-          // 요약 결과를 items에 병합
-          summaryMap.forEach((summary, id) => {
-            const item = items.find((i) => i.id === id)
-            if (item) {
-              item.summaryLines = summary.lines
-              item.conclusion = summary.conclusion
-            }
-          })
-        }
-      }
-    }
-
-    // ④ Firestore 저장 (배치 모드에서만)
-    if (!skipSummary && apiKey) {
+    // ④ Firestore 저장 (요약 없이, 새 기사만)
+    if (items.length > 0) {
       await this.saveToFirestore(items, mode).catch((err) => {
         console.warn('[Orchestrator] Firestore 저장 실패 (무시):', err instanceof Error ? err.message : err)
       })
     }
 
-    console.log(`[Orchestrator] 완료 (${Date.now() - start}ms)`)
-    return this.toOutput(items, newsItems.length, summarizedCount, start)
+    console.log(`[Orchestrator] 완료 — 신규 ${items.length}개 저장 (${Date.now() - start}ms)`)
+    return this.toOutput(items, newsItems.length, 0, start)
+  }
+
+  // 만료되지 않은 기사 제목 목록
+  private async fetchExistingTitles(): Promise<string[]> {
+    try {
+      const snapshot = await db.collection('articles')
+        .where('expiresAt', '>', new Date())
+        .select('title')
+        .get()
+      return snapshot.docs.map((d) => d.data().title as string)
+    } catch (err) {
+      console.warn('[Orchestrator] 기존 제목 로드 실패 (교차 중복 제거 생략):', (err as Error)?.message)
+      return []
+    }
   }
 
   private async saveToFirestore(items: NewsItem[], mode: 'trending' | 'latest') {
@@ -104,16 +96,18 @@ export class OrchestratorAgent {
         expiresAt.setDate(expiresAt.getDate() + 4)
         batch.set(
           articlesCol.doc(item.id),
-          { ...item, expiresAt, summaryGeneratedAt: item.summaryLines ? now : null },
+          { ...item, expiresAt, summaryGeneratedAt: null },
           { merge: true }
         )
       }
       await batch.commit()
     }
 
+    // trending 피드: trendScore 기준 정렬된 ID 목록 저장
     if (mode === 'trending') {
+      const sorted = [...items].sort((a, b) => (b.trendScore ?? 0) - (a.trendScore ?? 0))
       await db.collection('feeds').doc('trending').set({
-        ids: items.map((i) => i.id),
+        ids: sorted.map((i) => i.id),
         updatedAt: new Date().toISOString(),
       })
     }

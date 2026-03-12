@@ -1,9 +1,10 @@
 import Groq from 'groq-sdk'
 import type { NewsItem } from '@/types/news'
+import { setGroqRateLimit } from '@/lib/agents/agentLogger'
 
 export type SummaryData = { lines: string[]; conclusion: string }
 
-const GROQ_MODEL = 'llama-3.3-70b-versatile'
+const GROQ_MODEL = 'llama-3.1-8b-instant' // TPD 500,000 (70b-versatile은 100,000 한도)
 const MAX_PER_CALL = 20  // 30 → 20으로 줄여 토큰 절약
 
 function buildPrompt(items: NewsItem[]): string {
@@ -52,24 +53,60 @@ function parseGroqResponse(text: string, items: NewsItem[]): Map<string, Summary
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
-// Rate limit 헤더 저장 (동적 import로 순환 의존 방지)
-async function trySaveRateLimit(response: Response) {
+// Groq 모델별 일일 토큰 한도 (헤더로 제공 안 됨 — 공식 문서 기준)
+const GROQ_TPD_LIMITS: Record<string, number> = {
+  'llama-3.1-8b-instant':    500_000,
+  'llama-3.3-70b-versatile': 100_000,
+  'llama3-8b-8192':          500_000,
+  'gemma2-9b-it':            500_000,
+}
+
+// 일일 사용 토큰 누적 (인스턴스 내 메모리)
+let dailyTokensUsed = 0
+let dailyTokensDate = ''
+
+// 다음 UTC 자정 ISO 계산
+function nextUtcMidnight(): string {
+  const d = new Date()
+  d.setUTCHours(24, 0, 0, 0)
+  return d.toISOString()
+}
+
+// Rate limit 헤더 + 사용량 저장
+async function trySaveRateLimit(completion: { usage?: { total_tokens?: number } }, response: Response) {
   try {
-    const h = (key: string) => parseInt(response.headers.get(key) ?? '0', 10)
-    const limitDay = h('x-ratelimit-limit-tokens-day')
-    if (limitDay > 0) {
-      const { setGroqRateLimit } = await import('@/lib/agents/agentLogger')
-      setGroqRateLimit({
-        updatedAt: new Date().toISOString(),
-        limitRequests: h('x-ratelimit-limit-requests'),
-        remainingRequests: h('x-ratelimit-remaining-requests'),
-        limitTokens: h('x-ratelimit-limit-tokens'),
-        remainingTokens: h('x-ratelimit-remaining-tokens'),
-        limitTokensDay: limitDay,
-        remainingTokensDay: h('x-ratelimit-remaining-tokens-day'),
-      })
+    const g = (key: string) => {
+      try { return parseInt(response.headers.get(key) ?? '0', 10) } catch { return 0 }
     }
-  } catch { /* 무시 */ }
+    const gs = (key: string) => response.headers.get(key) ?? ''
+
+    // 일일 사용량 누적 (날짜 바뀌면 초기화)
+    const today = new Date().toISOString().slice(0, 10)
+    if (dailyTokensDate !== today) { dailyTokensUsed = 0; dailyTokensDate = today }
+    dailyTokensUsed += completion.usage?.total_tokens ?? 0
+
+    const limitTokensDay = GROQ_TPD_LIMITS[GROQ_MODEL] ?? 100_000
+    const remainingTokensDay = Math.max(0, limitTokensDay - dailyTokensUsed)
+    const limitTokens = g('x-ratelimit-limit-tokens')
+    const remainingTokens = g('x-ratelimit-remaining-tokens')
+
+    console.log(`[summarizer] 일일 토큰 사용: ${dailyTokensUsed.toLocaleString()} / ${limitTokensDay.toLocaleString()} (TPM: ${remainingTokens}/${limitTokens})`)
+
+    setGroqRateLimit({
+      updatedAt: new Date().toISOString(),
+      limitRequests: g('x-ratelimit-limit-requests'),
+      remainingRequests: g('x-ratelimit-remaining-requests'),
+      limitTokens,
+      remainingTokens,
+      resetTokens: gs('x-ratelimit-reset-tokens'),
+      resetRequests: gs('x-ratelimit-reset-requests'),
+      limitTokensDay,
+      remainingTokensDay,
+      resetTokensDay: nextUtcMidnight(),
+    })
+  } catch (e) {
+    console.warn('[summarizer] trySaveRateLimit 실패:', e)
+  }
 }
 
 async function callGroqWithRetry(
@@ -90,7 +127,7 @@ async function callGroqWithRetry(
           max_tokens: 2048,
         }).withResponse()
         text = completion.choices[0]?.message?.content ?? ''
-        trySaveRateLimit(response) // fire-and-forget
+        trySaveRateLimit(completion, response) // fire-and-forget
       } catch (innerErr: unknown) {
         const status = (innerErr as { status?: number })?.status
         // 429/401/5xx는 재시도 로직에서 처리
@@ -120,6 +157,11 @@ async function callGroqWithRetry(
   return ''
 }
 
+export interface SummarizeResult {
+  resultMap: Map<string, SummaryData>
+  tokensUsed: number  // 이번 실행에서 소비한 토큰 수
+}
+
 /**
  * Groq로 기사 배열을 요약. 20개 단위로 청크 처리.
  * 429 rate limit 시 최대 3회 지수 백오프 재시도.
@@ -127,18 +169,19 @@ async function callGroqWithRetry(
 export async function summarizeItems(
   items: NewsItem[],
   apiKey: string,
-  timeoutMs = 120_000  // 60s → 120s
-): Promise<Map<string, SummaryData>> {
-  if (items.length === 0) return new Map()
+  timeoutMs = 120_000
+): Promise<SummarizeResult> {
+  if (items.length === 0) return { resultMap: new Map(), tokensUsed: 0 }
 
   if (!apiKey) {
     console.error('[summarizer] GROQ_API_KEY 없음 — 요약 건너뜀')
-    return new Map()
+    return { resultMap: new Map(), tokensUsed: 0 }
   }
 
   console.log(`[summarizer] 시작 — ${items.length}개, timeout=${timeoutMs}ms`)
   const groq = new Groq({ apiKey, timeout: timeoutMs })
   const resultMap = new Map<string, SummaryData>()
+  const tokensBefore = dailyTokensUsed
 
   for (let i = 0; i < items.length; i += MAX_PER_CALL) {
     const chunk = items.slice(i, i + MAX_PER_CALL)
@@ -158,6 +201,7 @@ export async function summarizeItems(
     }
   }
 
-  console.log(`[summarizer] 완료 — ${resultMap.size}/${items.length}개`)
-  return resultMap
+  const tokensUsed = dailyTokensUsed - tokensBefore
+  console.log(`[summarizer] 완료 — ${resultMap.size}/${items.length}개, 사용 토큰: ${tokensUsed}`)
+  return { resultMap, tokensUsed }
 }

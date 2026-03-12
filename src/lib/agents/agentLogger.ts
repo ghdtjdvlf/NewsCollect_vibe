@@ -36,9 +36,12 @@ export interface GroqRateLimit {
   remainingRequests: number
   limitTokens: number
   remainingTokens: number
+  resetTokens: string      // 분당 토큰 리셋까지 남은 시간 (예: "6s", "1m30s")
+  resetRequests: string    // 분당 요청 리셋까지 남은 시간
   // 일일
   limitTokensDay: number
   remainingTokensDay: number
+  resetTokensDay: string   // 일일 토큰 리셋 ISO 시각 (다음 UTC 자정)
 }
 
 // ─── 인메모리 캐시 (같은 인스턴스 내 빠른 접근용) ───────────

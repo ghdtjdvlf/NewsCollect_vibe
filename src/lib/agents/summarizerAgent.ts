@@ -13,6 +13,7 @@ export interface SummarizerOutput {
   summaryMap: Map<string, SummaryData>
   succeeded: number
   failed: number
+  tokensUsed: number
 }
 
 export class SummarizerAgent extends BaseAgent<SummarizerInput, SummarizerOutput> {
@@ -24,15 +25,15 @@ export class SummarizerAgent extends BaseAgent<SummarizerInput, SummarizerOutput
     console.log(`[SummarizerAgent] 시작 — ${items.length}개, apiKey=${apiKey ? '있음' : '없음'}`)
 
     if (items.length === 0) {
-      return { summaryMap: new Map(), succeeded: 0, failed: 0 }
+      return { summaryMap: new Map(), succeeded: 0, failed: 0, tokensUsed: 0 }
     }
 
-    const summaryMap = await summarizeItems(items, apiKey, timeoutMs)
+    const { resultMap: summaryMap, tokensUsed } = await summarizeItems(items, apiKey, timeoutMs)
     const succeeded = summaryMap.size
     const failed = items.length - succeeded
 
-    console.log(`[SummarizerAgent] 완료 — ${succeeded}개 성공, ${failed}개 실패`)
+    console.log(`[SummarizerAgent] 완료 — ${succeeded}개 성공, ${failed}개 실패, ${tokensUsed} 토큰`)
 
-    return { summaryMap, succeeded, failed }
+    return { summaryMap, succeeded, failed, tokensUsed }
   }
 }
