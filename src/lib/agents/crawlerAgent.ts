@@ -29,7 +29,7 @@ export class CrawlerAgent extends BaseAgent<CrawlerInput, CrawlerOutput> {
   readonly name = 'CrawlerAgent'
 
   async execute(input: CrawlerInput): Promise<CrawlerOutput> {
-    const { mode, categories = ['경제', '사회', '정치', 'IT/과학'], limit = 20 } = input
+    const { mode, categories = ['경제', '사회', '정치', 'IT/과학'], limit = 50 } = input
 
     // 뉴스 포털 크롤링
     const newsItems = await withTimeout(

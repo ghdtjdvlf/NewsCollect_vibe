@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     const shortTitle = item.title ? `"${item.title.slice(0, 25)}..."` : id
     console.log(`[summarize] Groq 요약 시작 | ${shortTitle}`)
-    const summaryMap = await summarizeItems([item], apiKey, 25_000)
+    const { resultMap: summaryMap } = await summarizeItems([item], apiKey, 25_000)
     const summary = summaryMap.get(id)
 
     if (!summary) {

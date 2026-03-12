@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/firebase'
-import { summarizeItems } from '@/lib/summarizer'
+import { SummarizerAgent } from '@/lib/agents/summarizerAgent'
 import type { NewsItem } from '@/types/news'
 
 export const dynamic = 'force-dynamic'
@@ -48,7 +48,10 @@ export async function POST(req: NextRequest) {
     console.log(`[catch-up] 요약 시작 — ${items.length}개`)
     await db.collection('meta').doc('summarize').set({ lastRunAt: Date.now() })
 
-    const summaryMap = await summarizeItems(items, apiKey)
+    const summarizer = new SummarizerAgent()
+    const result = await summarizer.run({ items, apiKey })
+    const summaryMap = result.success ? result.data.summaryMap : new Map()
+    const tokensUsed = result.success ? result.data.tokensUsed : 0
 
     if (summaryMap.size > 0) {
       const batchWrite = db.batch()
@@ -64,7 +67,7 @@ export async function POST(req: NextRequest) {
       console.log(`[catch-up] 요약 저장 완료 — ${summaryMap.size}개`)
     }
 
-    return NextResponse.json({ message: '요약 완료', newlySummarized: summaryMap.size })
+    return NextResponse.json({ message: '요약 완료', newlySummarized: summaryMap.size, tokensUsed })
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : '오류 발생' },
