@@ -13,9 +13,9 @@ const client = axios.create({
 })
 
 export const newsApi = {
-  getTrending: async (offset = 0): Promise<TrendingPageResponse> => {
+  getTrending: async (offset = 0, limit?: number): Promise<TrendingPageResponse> => {
     const { data } = await client.get<TrendingPageResponse>('/trending', {
-      params: { offset },
+      params: limit !== undefined ? { offset, limit } : { offset },
     })
     return data
   },

@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const category = searchParams.get('category') as NewsCategory | null
   const cursor = searchParams.get('cursor') // 마지막 기사의 publishedAt ISO string
-  const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 50)
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 100)
 
   try {
     const articlesCol = db.collection('articles')

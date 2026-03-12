@@ -68,12 +68,14 @@ export class OrchestratorAgent {
     return this.toOutput(items, newsItems.length, 0, start)
   }
 
-  // 만료되지 않은 기사 제목 목록
+  // 최근 48시간 기사 제목 목록 (중복 제거용, 읽기 최소화)
   private async fetchExistingTitles(): Promise<string[]> {
     try {
+      const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
       const snapshot = await db.collection('articles')
-        .where('expiresAt', '>', new Date())
+        .where('publishedAt', '>', since)
         .select('title')
+        .limit(500)
         .get()
       return snapshot.docs.map((d) => d.data().title as string)
     } catch (err) {
