@@ -1,5 +1,19 @@
 import type { NewsCategory } from '@/types/news'
 import { createHash } from 'crypto'
+import { fetchWithRetry } from '@/lib/fetcher'
+
+// 기사 페이지에서 실제 발행시간 추출 (네이버/다음 공통)
+export async function fetchArticlePublishedTime(url: string): Promise<string | null> {
+  try {
+    const html = await fetchWithRetry(url, { timeout: 6000 })
+    const match =
+      html.match(/<meta[^>]+property=["']article:published_time["'][^>]+content=["']([^"']+)["']/) ||
+      html.match(/data-date-time=["']([^"']+)["']/) ||
+      html.match(/<meta[^>]+name=["']pubdate["'][^>]+content=["']([^"']+)["']/)
+    if (match?.[1]) return new Date(match[1]).toISOString()
+  } catch { /* 무시 */ }
+  return null
+}
 
 let counter = 0
 
@@ -39,13 +53,15 @@ function parseKoreanRelativeDate(str: string): Date | null {
 
   // "2026. 2. 25. 17:21" or "2025.01.15. 오후 3:45" or "2025.01.15."
   // 점 뒤 공백 허용 (\.\s*)
+  const KST = 9 * 60 * 60 * 1000
+
   const full = s.match(/(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.\s*(?:(오전|오후)?\s*(\d{1,2}):(\d{2}))?/)
   if (full) {
     let h = full[5] ? +full[5] : 0
     const m = full[6] ? +full[6] : 0
     if (full[4] === '오후' && h < 12) h += 12
     if (full[4] === '오전' && h === 12) h = 0
-    return new Date(+full[1], +full[2] - 1, +full[3], h, m)
+    return new Date(Date.UTC(+full[1], +full[2] - 1, +full[3], h, m) - KST)
   }
 
   // "01.15. 오후 3:45" or "01.15." (올해 기준)
@@ -55,7 +71,7 @@ function parseKoreanRelativeDate(str: string): Date | null {
     const m = short[5] ? +short[5] : 0
     if (short[3] === '오후' && h < 12) h += 12
     if (short[3] === '오전' && h === 12) h = 0
-    return new Date(now.getFullYear(), +short[1] - 1, +short[2], h, m)
+    return new Date(Date.UTC(now.getFullYear(), +short[1] - 1, +short[2], h, m) - KST)
   }
 
   return null
