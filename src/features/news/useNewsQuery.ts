@@ -4,11 +4,15 @@ import type { FetchNewsParams, SearchParams, TrendingPageResponse } from '@/type
 
 const REFETCH_INTERVAL = 60 * 1000 // 60초
 
+const INITIAL_LIMIT = 100
+const SCROLL_LIMIT = 5
+
 // ─── 화제뉴스 (무한 스크롤) ──────────────────────────────
 export function useTrendingNews() {
   return useInfiniteQuery({
     queryKey: ['trending-inf'],
-    queryFn: ({ pageParam }) => newsApi.getTrending(pageParam as number),
+    queryFn: ({ pageParam }) =>
+      newsApi.getTrending(pageParam as number, pageParam === 0 ? INITIAL_LIMIT : SCROLL_LIMIT),
     getNextPageParam: (lastPage: TrendingPageResponse) =>
       lastPage.hasMore ? (lastPage.nextOffset ?? undefined) : undefined,
     initialPageParam: 0 as number,
@@ -24,7 +28,11 @@ export function useLatestNews(params: Omit<FetchNewsParams, 'cursor'> = {}) {
   return useInfiniteQuery({
     queryKey: ['latest', params],
     queryFn: ({ pageParam }) =>
-      newsApi.getLatest({ ...params, cursor: pageParam as string | null }),
+      newsApi.getLatest({
+        ...params,
+        cursor: pageParam as string | null,
+        limit: pageParam === null ? INITIAL_LIMIT : SCROLL_LIMIT,
+      }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore ? lastPage.nextCursor : undefined,
     initialPageParam: null as string | null,

@@ -16,7 +16,7 @@ function docToNewsItem(data: Record<string, unknown>): NewsItem {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const offset = parseInt(searchParams.get('offset') ?? '0', 10)
-  const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 50)
+  const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 100)
 
   try {
     const feedDoc = await db.collection('feeds').doc('trending').get()
