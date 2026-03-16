@@ -6,6 +6,19 @@ import type { NewsItem } from '@/types/news'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 25
 
+// ─── 서버 인메모리 캐시 ───────────────────────────────────
+const routeCache = new Map<string, { data: unknown; expiresAt: number }>()
+const CACHE_TTL = 60 * 1000 // 60초
+
+function getCached<T>(key: string): T | null {
+  const entry = routeCache.get(key)
+  if (!entry || Date.now() > entry.expiresAt) { routeCache.delete(key); return null }
+  return entry.data as T
+}
+function setCached<T>(key: string, data: T) {
+  routeCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL })
+}
+
 const DEFAULT_LIMIT = 20
 
 function docToNewsItem(data: Record<string, unknown>): NewsItem {
@@ -17,6 +30,10 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const offset = parseInt(searchParams.get('offset') ?? '0', 10)
   const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 100)
+
+  const cacheKey = `trending:${offset}:${limit}`
+  const cached = getCached<object>(cacheKey)
+  if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30' } })
 
   try {
     const feedDoc = await db.collection('feeds').doc('trending').get()
@@ -76,8 +93,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const responseData = { items, hasMore, nextOffset, updatedAt }
+    setCached(cacheKey, responseData)
+
     return NextResponse.json(
-      { items, hasMore, nextOffset, updatedAt },
+      responseData,
       { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=30' } }
     )
   } catch (err) {

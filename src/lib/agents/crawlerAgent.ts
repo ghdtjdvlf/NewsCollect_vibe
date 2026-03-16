@@ -46,7 +46,7 @@ export class CrawlerAgent extends BaseAgent<CrawlerInput, CrawlerOutput> {
               Promise.all(categories.map((cat) => fetchGoogleNewsByCategory(cat, 5))).then((r) => r.flat()),
             ]
       ).then((results) => results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []))),
-      8000,
+      30000,
       [] as NewsItem[]
     )
 

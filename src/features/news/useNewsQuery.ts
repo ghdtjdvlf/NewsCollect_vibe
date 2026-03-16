@@ -4,7 +4,7 @@ import type { FetchNewsParams, SearchParams, TrendingPageResponse } from '@/type
 
 const REFETCH_INTERVAL = 60 * 1000 // 60초
 
-const INITIAL_LIMIT = 100
+const INITIAL_LIMIT = 10
 const SCROLL_LIMIT = 5
 
 // ─── 화제뉴스 (무한 스크롤) ──────────────────────────────

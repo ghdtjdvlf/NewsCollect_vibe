@@ -6,6 +6,19 @@ import type { NewsItem, NewsCategory } from '@/types/news'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 25
 
+// ─── 서버 인메모리 캐시 (첫 페이지만) ────────────────────
+const routeCache = new Map<string, { data: unknown; expiresAt: number }>()
+const CACHE_TTL = 30 * 1000 // 30초
+
+function getCached<T>(key: string): T | null {
+  const entry = routeCache.get(key)
+  if (!entry || Date.now() > entry.expiresAt) { routeCache.delete(key); return null }
+  return entry.data as T
+}
+function setCached<T>(key: string, data: T) {
+  routeCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL })
+}
+
 const DEFAULT_LIMIT = 20
 
 function docToNewsItem(data: Record<string, unknown>): NewsItem {
@@ -18,6 +31,13 @@ export async function GET(request: NextRequest) {
   const category = searchParams.get('category') as NewsCategory | null
   const cursor = searchParams.get('cursor') // 마지막 기사의 publishedAt ISO string
   const limit = Math.min(parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10), 100)
+
+  // 첫 페이지(cursor 없음)만 캐시
+  const cacheKey = `latest:${category ?? 'all'}:${limit}`
+  if (!cursor) {
+    const cached = getCached<object>(cacheKey)
+    if (cached) return NextResponse.json(cached, { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=30' } })
+  }
 
   try {
     const articlesCol = db.collection('articles')
@@ -55,8 +75,11 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    const responseData = { items, nextCursor, hasMore, updatedAt: new Date().toISOString() }
+    if (!cursor) setCached(cacheKey, responseData)
+
     return NextResponse.json(
-      { items, nextCursor, hasMore, updatedAt: new Date().toISOString() },
+      responseData,
       { headers: { 'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=30' } }
     )
   } catch (err) {

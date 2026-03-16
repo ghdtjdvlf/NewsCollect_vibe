@@ -73,7 +73,7 @@ export class OrchestratorAgent {
     try {
       const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString()
       const snapshot = await db.collection('articles')
-        .where('publishedAt', '>', since)
+        .where('collectedAt', '>', since)
         .select('title')
         .limit(500)
         .get()
@@ -87,20 +87,30 @@ export class OrchestratorAgent {
   private async saveToFirestore(items: NewsItem[], mode: 'trending' | 'latest') {
     const articlesCol = db.collection('articles')
     const CHUNK = 500
-    const now = new Date()
 
     for (let i = 0; i < items.length; i += CHUNK) {
       const chunk = items.slice(i, i + CHUNK)
+
+      // 기존 문서 확인 — 이미 존재하는 기사는 publishedAt 덮어쓰지 않음
+      const docRefs = chunk.map(item => articlesCol.doc(item.id))
+      const existingDocs = await db.getAll(...docRefs)
+      const existingIds = new Set(existingDocs.filter(d => d.exists).map(d => d.id))
+
       const batch = db.batch()
 
       for (const item of chunk) {
         const expiresAt = new Date(item.publishedAt)
         expiresAt.setDate(expiresAt.getDate() + 4)
-        batch.set(
-          articlesCol.doc(item.id),
-          { ...item, expiresAt, summaryGeneratedAt: null },
-          { merge: true }
-        )
+        const docRef = articlesCol.doc(item.id)
+
+        if (existingIds.has(item.id)) {
+          // 기존 기사: publishedAt은 최초 저장값 유지, 나머지만 업데이트
+          const { publishedAt: _pa, ...rest } = item
+          batch.set(docRef, { ...rest, expiresAt }, { merge: true })
+        } else {
+          // 신규 기사: 전체 저장
+          batch.set(docRef, { ...item, expiresAt, summaryGeneratedAt: null })
+        }
       }
       await batch.commit()
     }
